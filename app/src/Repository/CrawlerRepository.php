@@ -209,6 +209,14 @@ final class CrawlerRepository
 
     // ---------- 导入 / cj_import_map ----------
 
+    /** 待导入数量（import_ready=1 且未导入）。 */
+    public function pendingImportCount(): int
+    {
+        return (int) $this->db->query(
+            'SELECT COUNT(*) FROM cj_jobs_clean WHERE import_ready = 1 AND imported_at IS NULL'
+        )->fetchColumn();
+    }
+
     public function importReadyJobs(int $limit = 200): array
     {
         $stmt = $this->db->prepare(

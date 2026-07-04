@@ -110,10 +110,20 @@ server {
 
 ## 日常操作
 
+内部页面（`index.php` 概览）提供两个人工操作按钮：
+
+- **一键采集**：后台拉起 `crawl.php --all` 采集全部启用站点。
+  **采集间隔硬性 ≥ 1 小时**（`crawl.min_trigger_interval`，配置只能调大不能调小），
+  Web 按钮与 cron 共用同一触发闸门（文件锁 + 运行态检查），间隔不足或采集进行中时按钮置灰。
+- **导入主库**：采集完成后**不会自动导入** zhaopin 主站数据库——去重通过的记录仅标记
+  `import_ready=1`，必须人工点击此按钮（或执行 `import.php`）确认导入。
+
+对应 CLI：
+
 | 操作 | 命令 |
 |---|---|
 | 采集单站 | `php app/bin/crawl.php --site=oulang` |
-| 采集全部启用站 | `php app/bin/crawl.php --all` |
+| 采集全部启用站 | `php app/bin/crawl.php --all`（间隔 <1h 会被闸门拒绝；`--force` 仅调试用） |
 | 存量重跑去重 | `php app/bin/dedup.php` |
 | 预览待导入 | `php app/bin/import.php --dry-run` |
 | 导入主库（人工把关） | `php app/bin/import.php --limit=100` |

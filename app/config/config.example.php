@@ -50,6 +50,10 @@ return [
 
     // ---- 采集行为 ----
     'crawl' => [
+        // 采集触发最小间隔（秒）。硬下限 1 小时：配置小于 3600 时按 3600 生效
+        'min_trigger_interval' => 3600,
+        // Web 一键采集后台拉起 CLI 所用的 php 可执行文件（FPM 下 PHP_BINARY 不是 CLI，勿用）
+        'php_cli'             => 'php',
         'purge_after_days'    => 90,   // 采集入库时写 purge_after = 今天 + N 天
         'stop_after_known'    => 5,    // 增量采集：连续 M 条已存在即停止翻页（§6.4）
         'max_pages_per_run'   => 10,   // 单站单次采集页数上限（§6.1）
