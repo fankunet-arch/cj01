@@ -1,0 +1,17 @@
+# cj_html 是唯一 web root；app/ 在其上一级，Web 天然不可达。
+# 本文件仅做目录保护（Apache 环境；Nginx 按 README 配置）。
+
+Options -Indexes
+
+# 禁止访问隐藏文件
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# 只允许指定入口执行 PHP，其余一律拒绝
+<FilesMatch "\.php$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "^(index|review|dashboard)\.php$">
+    Require all granted
+</FilesMatch>

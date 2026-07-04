@@ -1,0 +1,26 @@
+{
+    "name": "zhaopin/cj-crawler",
+    "description": "zhaopin.es 冷启动招聘信息采集器（独立临时模块，用完即删）",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1",
+        "ext-curl": "*",
+        "ext-pdo_mysql": "*",
+        "ext-mbstring": "*",
+        "ext-dom": "*"
+    },
+    "suggest": {
+        "guzzlehttp/guzzle": "更完善的 HTTP 客户端（内置 cURL Fetcher 可用时非必需）",
+        "symfony/dom-crawler": "更强的 HTML 解析（内置 DOMXPath 解析可用时非必需）",
+        "symfony/css-selector": "完整 CSS 选择器支持（内置极简转换器覆盖常用形态）"
+    },
+    "autoload": {
+        "psr-4": {
+            "Cj\\": "app/src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
