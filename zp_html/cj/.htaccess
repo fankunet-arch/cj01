@@ -1,4 +1,5 @@
-# cj_html 是唯一 web root；app/ 在其上一级，Web 天然不可达。
+# 采集器可见目录 zp_html/cj/（挂载于 http://zhaopin.es/cj/）；
+# 私有逻辑在 app/cj/（web root 之外），Web 天然不可达。
 # 本文件仅做目录保护（Apache 环境；Nginx 按 README 配置）。
 
 Options -Indexes

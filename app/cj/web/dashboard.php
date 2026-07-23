@@ -13,7 +13,7 @@ $renderBody = function () use ($runs) {
     <div class="card">
         <h2>最近 <?= count($runs) ?> 次采集任务</h2>
         <?php if ($runs === []): ?>
-            <p class="muted">暂无采集记录。cron 触发 <code>app/bin/crawl.php</code> 后此处显示运行情况。</p>
+            <p class="muted">暂无采集记录。cron 触发 <code>app/cj/bin/crawl.php</code> 后此处显示运行情况。</p>
         <?php else: ?>
             <table>
                 <tr>

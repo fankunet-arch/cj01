@@ -89,7 +89,7 @@ $renderBody = function () use ($stats, $dbError, $flash, $crawlStatus) {
             <?php if ($crawlStatus['next_allowed_at'] !== null): ?>
                 · 下次可触发：<?= cj_e($crawlStatus['next_allowed_at']) ?>
             <?php endif; ?>
-            · 采集间隔不能小于 1 小时（Web 与 cron 共用同一闸门）。进度见<a href="/dashboard.php">运行看板</a>。
+            · 采集间隔不能小于 1 小时（Web 与 cron 共用同一闸门）。进度见<a href="<?= cj_e(cj_url('dashboard.php')) ?>">运行看板</a>。
         </p>
     </div>
 
@@ -108,7 +108,7 @@ $renderBody = function () use ($stats, $dbError, $flash, $crawlStatus) {
         <p class="muted">
             采集完成后<strong>不会自动导入</strong> zhaopin 主站数据库——去重通过的记录仅标记为待导入，
             须在此人工点击确认（或在服务器执行 <code>php app/bin/import.php</code>）。
-            低置信度记录先过<a href="/review.php">复核队列</a>，复核“保留”后才进入待导入。
+            低置信度记录先过<a href="<?= cj_e(cj_url('review.php')) ?>">复核队列</a>，复核“保留”后才进入待导入。
         </p>
     </div>
     <?php

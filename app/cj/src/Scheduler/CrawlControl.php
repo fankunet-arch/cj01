@@ -107,7 +107,7 @@ final class CrawlControl
     {
         $fp = @fopen(self::lockFile(), 'c+');
         if ($fp === false) {
-            return ['ok' => false, 'message' => '无法打开触发锁文件（检查 app/logs 写权限）'];
+            return ['ok' => false, 'message' => '无法打开触发锁文件（检查 app/cj/logs 写权限）'];
         }
         if (!flock($fp, LOCK_EX)) {
             fclose($fp);

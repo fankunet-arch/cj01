@@ -82,6 +82,9 @@ return [
 
     // ---- 内部页面（复核/看板）访问控制 ----
     'web' => [
+        // 采集器挂载的 URL 基础路径（域名 http://zhaopin.es/cj/ → '/cj'）。
+        // 页面内的静态资源与导航链接都以此为前缀；换路径只改这里。
+        'base_path'    => '/cj',
         'auth_user'    => 'admin',
         'auth_pass'    => 'CHANGE_ME',
         'ip_whitelist' => [],          // 如 ['1.2.3.4']；留空则只做 Basic Auth

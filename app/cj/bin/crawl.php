@@ -3,16 +3,16 @@
  * 采集入口（CLI，由 cron 调用，不经 Web）。
  *
  * 用法：
- *   php app/bin/crawl.php --site=oulang     # 单站
- *   php app/bin/crawl.php --all             # 全部启用站点
- *   php app/bin/crawl.php --all --force     # 跳过间隔闸门（仅调试）
+ *   php app/cj/bin/crawl.php --site=oulang     # 单站
+ *   php app/cj/bin/crawl.php --all             # 全部启用站点
+ *   php app/cj/bin/crawl.php --all --force     # 跳过间隔闸门（仅调试）
  *
  * 采集间隔不能小于 1 小时：CLI 与 Web 一键采集共用 CrawlControl 闸门；
  * --no-guard 仅供 Web 触发链路内部使用（许可已在 Web 进程原子获取）。
  *
  * cron 示例（各站错开时段，§7；间隔小于 1 小时的触发会被闸门拒绝）：
- *   10 3 * * *  php /path/to/app/bin/crawl.php --site=oulang
- *   40 4 * * *  php /path/to/app/bin/crawl.php --site=huarenjie
+ *   10 3 * * *  php /path/to/app/cj/bin/crawl.php --site=oulang
+ *   40 4 * * *  php /path/to/app/cj/bin/crawl.php --site=huarenjie
  */
 
 declare(strict_types=1);
@@ -38,7 +38,7 @@ if (isset($options['all'])) {
 } elseif (isset($options['site'])) {
     $file = $sitesDir . '/' . preg_replace('/[^a-z0-9_]/i', '', (string) $options['site']) . '.php';
     if (!is_file($file)) {
-        fwrite(STDERR, "未知站点：{$options['site']}（app/config/sites 下无对应配置）\n");
+        fwrite(STDERR, "未知站点：{$options['site']}（app/cj/config/sites 下无对应配置）\n");
         exit(1);
     }
     $targets[] = require $file;

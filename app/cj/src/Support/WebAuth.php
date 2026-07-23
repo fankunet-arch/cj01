@@ -27,7 +27,7 @@ final class WebAuth
         $pass = $cfg['auth_pass'] ?? '';
         if ($user === '' || $pass === '' || $pass === 'CHANGE_ME') {
             http_response_code(503);
-            exit('内部页面未配置访问口令（app/config/config.php → web.auth_pass）');
+            exit('内部页面未配置访问口令（app/cj/config/config.php → web.auth_pass）');
         }
 
         $givenUser = $_SERVER['PHP_AUTH_USER'] ?? '';
