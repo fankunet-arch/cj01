@@ -141,13 +141,13 @@ final class CrawlRunner
         $contactKey = ContactNormalizer::contactKey($phoneNorm, $wechatNorm);
         $simhash = SimHash::ofJobText($raw['title'], $raw['company'], $raw['description']);
 
-        // 二级 + 三级去重（phone_norm 供三级主库比对，主库真实结构用 phone_norm 而非 contact_key）
+        // 二级 + 三级去重（三级主库比对用原始电话，MainRepository 内按 zp_phone_norm 归一化）
         $verdict = $this->dedup->judge([
-            'contact_key'  => $contactKey,
-            'phone_norm'   => $phoneNorm,
-            'simhash'      => $simhash,
-            'title'        => $raw['title'],
-            'publish_date' => $raw['publish_date'],
+            'contact_key'   => $contactKey,
+            'contact_phone' => $raw['contact_phone'],
+            'simhash'       => $simhash,
+            'title'         => $raw['title'],
+            'publish_date'  => $raw['publish_date'],
         ]);
 
         $purgeDays = (int) (cj_config('crawl')['purge_after_days'] ?? 90);

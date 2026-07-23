@@ -42,7 +42,7 @@ final class DedupEngine
 
     /**
      * 二级 + 三级判定。
-     * $job 需含：contact_key(?string, 采集库内去重)、phone_norm(?string, 主库去重)、
+     * $job 需含：contact_key(?string, 采集库内去重)、contact_phone(?string, 主库去重原始电话)、
      *           simhash(int)、title、publish_date；
      * 重判存量记录时传 self_id 以排除与自身比对（bin/dedup.php）。
      * 返回：
@@ -97,11 +97,12 @@ final class DedupEngine
         }
 
         // ---- 三级：与 zhaopin 主库 ----
-        // 主库真实结构用 phone_norm 做电话去重键（已并入 idx_dedup），无 contact_key。
+        // 主库用 phone_norm 做电话去重键（已并入 idx_dedup）。主库 phone_norm 由
+        // zp_phone_norm 生成，故传原始电话给 MainRepository，用同一算法归一化后比对。
         if ($this->main->enabled()) {
-            $phoneNorm = (string) ($job['phone_norm'] ?? '');
-            if ($phoneNorm !== '') {
-                $mainId = $this->main->findByPhoneNorm($phoneNorm);
+            $rawPhone = (string) ($job['contact_phone'] ?? '');
+            if ($rawPhone !== '') {
+                $mainId = $this->main->findByPhone($rawPhone);
                 if ($mainId !== null) {
                     // cj_dedup_log.signal 枚举仍记为 contact_key（phone_norm 即联系方式键）
                     $this->pendingLogs[] = ['main', $mainId, 'contact_key', null, 'dup'];

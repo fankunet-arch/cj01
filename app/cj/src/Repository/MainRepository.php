@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Cj\Repository;
 
 use Cj\Dedup\SimHash;
+use Cj\Normalizer\ContactNormalizer;
 use Cj\Support\Db;
 use PDO;
 
@@ -68,20 +69,26 @@ final class MainRepository
 
     // ---------- 三级去重（只读） ----------
 
-    /** phone_norm 是否命中主库；命中返回主库记录 id，否则 null。 */
-    public function findByPhoneNorm(string $phoneNorm): ?int
+    /**
+     * 采集到的原始电话是否命中主库；命中返回主库记录 id，否则 null。
+     * 主库 zhaopin_posts.phone_norm 由 zp_phone_norm 生成（保留数字+加号、截断20），
+     * 故此处用同一算法（ContactNormalizer::phoneMain）归一化后按 phone_norm 等值比对，
+     * 才能命中主库既有记录并走 idx_dedup 索引。
+     */
+    public function findByPhone(?string $rawPhone): ?int
     {
-        if ($phoneNorm === '') {
+        $norm = ContactNormalizer::phoneMain($rawPhone);
+        if (strlen($norm) < 9) {   // 主站发布也要求 phone_norm ≥ 9，短号视为无效不比对
             return null;
         }
         if ($this->mode === 'api') {
-            $r = $this->apiCheck(['phone_norm' => $phoneNorm]);
+            $r = $this->apiCheck(['phone_norm' => $norm]);
             return ($r['exists'] ?? false) ? (int) ($r['id'] ?? 0) : null;
         }
         $stmt = $this->pdo()->prepare(
             'SELECT id FROM ' . $this->postsTable() . ' WHERE phone_norm = :k LIMIT 1'
         );
-        $stmt->execute([':k' => $phoneNorm]);
+        $stmt->execute([':k' => $norm]);
         $id = $stmt->fetchColumn();
         return $id !== false ? (int) $id : null;
     }
@@ -143,17 +150,26 @@ final class MainRepository
     /**
      * 采集记录写入 zhaopin_posts，origin='crawler'，返回主库新 id。
      * $job 为 cj_jobs_clean 一行（含 title/company/salary_raw/description/city/district/
-     * category/contact_phone/phone_norm/contact_wechat/contact_name/simhash）。
+     * category/contact_phone/contact_wechat/contact_name）。
+     *
+     * 与主站发布逻辑（app/handlers/publish.php）对齐：
+     *  - phone_norm = zp_phone_norm(phone)（保留数字+加号、截断20）
+     *  - content_hash = zp_content_hash(content)（去空白+小写后 SHA-256）
+     *  - simhash 由最终 content 计算（与 backfill/主站语义一致）
+     *  - created_at/bumped_at 存 UTC（主站库内统一 UTC，见 zp_now）
+     *  - type=1(招聘) / poster_type=1(游客) / status=1(在线)，均可配置
      */
     public function insertJob(array $job): int
     {
         $pdo = $this->pdo();
 
-        $content   = $this->buildContent($job);
-        $phone     = (string) ($job['contact_phone'] ?? '');
-        $phoneNorm = (string) ($job['phone_norm'] ?? '');
-        $regionId  = $this->resolveRegionId($job['city'] ?? null, $job['district'] ?? null);
+        $content    = $this->buildContent($job);
+        $phone      = (string) ($job['contact_phone'] ?? '');
+        $phoneNorm  = ContactNormalizer::phoneMain($phone);   // 主库兼容归一化
+        $simhash    = SimHash::compute($content);             // 与 backfill 同源：对最终 content 取指纹
+        $regionId   = $this->resolveRegionId($job['city'] ?? null, $job['district'] ?? null);
         $categoryId = $this->resolveCategoryId($job['category'] ?? null);
+        $nowUtc     = gmdate('Y-m-d H:i:s');                  // == 主站 zp_now()
 
         $sql = 'INSERT INTO ' . $this->postsTable() . '
                 (public_code, type, content, content_hash, contact_name, phone, phone_norm,
@@ -162,7 +178,7 @@ final class MainRepository
                 VALUES
                 (:public_code, :type, :content, :content_hash, :contact_name, :phone, :phone_norm,
                  :wechat, :region_id, :category_id, :poster_type, NULL, :simhash, :status,
-                 \'crawler\', NOW(), NOW())';
+                 \'crawler\', :created_at, :bumped_at)';
 
         $stmt = $pdo->prepare($sql);
         $params = [
@@ -171,13 +187,15 @@ final class MainRepository
             ':content_hash' => $this->contentHash($content),
             ':contact_name' => mb_substr((string) ($job['contact_name'] ?? ''), 0, 50),
             ':phone'        => mb_substr($phone, 0, 30),
-            ':phone_norm'   => mb_substr($phoneNorm, 0, 20),
-            ':wechat'       => $job['contact_wechat'] !== null ? mb_substr((string) $job['contact_wechat'], 0, 60) : null,
+            ':phone_norm'   => $phoneNorm,
+            ':wechat'       => !empty($job['contact_wechat']) ? mb_substr((string) $job['contact_wechat'], 0, 60) : null,
             ':region_id'    => $regionId,
             ':category_id'  => $categoryId,
             ':poster_type'  => (int) ($this->importCfg['poster_type'] ?? 1),
-            ':simhash'      => $job['simhash'] !== null ? (string) $job['simhash'] : null,
+            ':simhash'      => SimHash::toDb($simhash),
             ':status'       => (int) ($this->importCfg['status'] ?? 1),
+            ':created_at'   => $nowUtc,
+            ':bumped_at'    => $nowUtc,
         ];
 
         // public_code 唯一，冲突则重试
@@ -219,13 +237,13 @@ final class MainRepository
     }
 
     /**
-     * content_hash：主站精确去重键。默认 SHA-256(content)。
-     * 若主站在入库前对 content 做归一化再哈希，请在此对齐其算法，
-     * 否则导入记录不会与主站后续相同内容的用户发帖精确碰撞（不影响功能，仅影响精确去重命中）。
+     * content_hash：主站精确去重键。
+     * ⚠ 必须与主站 zp_content_hash() 一致：去掉所有空白、转小写后 SHA-256，
+     * 否则导入记录不会与主站相同内容的用户发帖精确碰撞（idx_dedup: phone_norm+content_hash）。
      */
     private function contentHash(string $content): string
     {
-        return hash('sha256', $content);
+        return hash('sha256', mb_strtolower(preg_replace('/\s+/u', '', $content) ?? ''));
     }
 
     /** 城市/区域名称 → region_id；查不到用兜底配置。 */
@@ -273,10 +291,13 @@ final class MainRepository
         return mb_strtolower(trim($name));
     }
 
-    /** 生成 10 位 public_code（大小写字母+数字，去易混字符）。 */
+    /**
+     * 生成 10 位 public_code（不可枚举，去易混字符 0O1lI）。
+     * 字母表与主站 zp_public_code() 一致。
+     */
     private function generatePublicCode(): string
     {
-        $alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+        $alphabet = '23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ';
         $code = '';
         $max = strlen($alphabet) - 1;
         for ($i = 0; $i < 10; $i++) {

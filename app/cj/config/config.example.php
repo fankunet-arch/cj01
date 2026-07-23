@@ -44,13 +44,15 @@ return [
         ],
 
         // 导入映射：采集数据 → zhaopin_posts 必填字段的取值。
-        // 下列枚举/兜底值务必按主站真实约定确认后再开启导入，否则数据语义会错。
+        // type/poster_type/status 已按主站 publish.php 实际取值确认（招聘/游客/在线）；
+        // phone_norm、content_hash、simhash 由导入代码自动按主站算法生成，无需配置。
         'import' => [
-            'type'                => 1,  // zhaopin_posts.type：招聘帖类型值（按主站枚举确认）
-            'poster_type'         => 1,  // 发布者类型（个人/商家…，按主站枚举确认）
-            'status'              => 1,  // 导入后帖子状态（1=正常显示，按主站约定确认）
-            // 城市/区域、分类无法按名称匹配到主库时的兜底外键 id，
-            // 必须填主库中真实存在的“其他/未分类”记录 id（不能留 0）。
+            'type'                => 1,  // 1=招聘 / 2=求职（主站 publish.php 语义），采集为招聘
+            'poster_type'         => 1,  // 1=游客发布 / 2=注册用户（采集无用户，取 1）
+            'status'              => 1,  // 1=在线显示（主站发布即 status=1）
+            // ⚠ 仍需你确认：城市/区域、分类无法按名称匹配到主库时的兜底外键 id，
+            // 必须填主库 zhaopin_regions / zhaopin_categories 中真实存在的
+            //「其他/未分类」记录 id（不能留 0，否则外键值无意义）。
             'default_region_id'   => 0,
             'default_category_id' => 0,
         ],

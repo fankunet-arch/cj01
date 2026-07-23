@@ -30,7 +30,7 @@ $repo = new CrawlerRepository($db);
 $engine = new DedupEngine($repo);
 
 $rows = $db->query(
-    "SELECT id, contact_key, phone_norm, LPAD(HEX(simhash),16,'0') AS h, title, publish_date
+    "SELECT id, contact_key, contact_phone, LPAD(HEX(simhash),16,'0') AS h, title, publish_date
      FROM cj_jobs_clean
      WHERE dedup_status IN ('unique','review') AND imported_at IS NULL
      ORDER BY id ASC LIMIT " . $limit
@@ -39,12 +39,12 @@ $rows = $db->query(
 $changed = 0;
 foreach ($rows as $row) {
     $verdict = $engine->judge([
-        'self_id'      => (int) $row['id'],   // 排除与自身比对
-        'contact_key'  => $row['contact_key'],
-        'phone_norm'   => $row['phone_norm'],
-        'simhash'      => $row['h'] !== null ? SimHash::fromHex($row['h']) : 0,
-        'title'        => $row['title'],
-        'publish_date' => $row['publish_date'],
+        'self_id'       => (int) $row['id'],   // 排除与自身比对
+        'contact_key'   => $row['contact_key'],
+        'contact_phone' => $row['contact_phone'],
+        'simhash'       => $row['h'] !== null ? SimHash::fromHex($row['h']) : 0,
+        'title'         => $row['title'],
+        'publish_date'  => $row['publish_date'],
     ]);
     $engine->flushLogs((int) $row['id']);
 
