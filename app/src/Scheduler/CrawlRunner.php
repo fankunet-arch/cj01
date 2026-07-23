@@ -141,9 +141,10 @@ final class CrawlRunner
         $contactKey = ContactNormalizer::contactKey($phoneNorm, $wechatNorm);
         $simhash = SimHash::ofJobText($raw['title'], $raw['company'], $raw['description']);
 
-        // 二级 + 三级去重
+        // 二级 + 三级去重（phone_norm 供三级主库比对，主库真实结构用 phone_norm 而非 contact_key）
         $verdict = $this->dedup->judge([
             'contact_key'  => $contactKey,
+            'phone_norm'   => $phoneNorm,
             'simhash'      => $simhash,
             'title'        => $raw['title'],
             'publish_date' => $raw['publish_date'],

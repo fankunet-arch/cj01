@@ -23,21 +23,36 @@ return [
         // 'api'  = 方案 A：调用主站内部去重接口
         'mode' => 'off',
 
-        // mode=db 时使用（只读账号；导入/清理阶段需要写权限的账号可单独配置）
+        // mode=db 时使用。
+        // 去重（三级比对）只需只读；导入/清理需对 posts 表有写/删权限。
         'db' => [
-            'host'       => '127.0.0.1',
-            'port'       => 3306,
-            'name'       => 'zhaopin_db',
-            'user'       => 'crawler_ro',
-            'pass'       => 'CHANGE_ME',
-            'charset'    => 'utf8mb4',
-            'jobs_table' => 'jobs',        // 主库招聘表名，按实际调整
+            'host'             => '127.0.0.1',
+            'port'             => 3306,
+            'name'             => 'mhdlmskzoi87b0i',   // ← zhaopin 主库名，按实际调整
+            'user'             => 'crawler_ro',
+            'pass'             => 'CHANGE_ME',
+            'charset'          => 'utf8mb4',
+            'posts_table'      => 'zhaopin_posts',      // 招聘帖表（真实结构）
+            'regions_table'    => 'zhaopin_regions',    // 地区表（名称→region_id 映射）
+            'categories_table' => 'zhaopin_categories', // 分类表（名称→category_id 映射）
         ],
 
         // mode=api 时使用
         'api' => [
             'url'   => 'https://zhaopin.es/internal/dedup-check',
             'token' => 'CHANGE_ME',
+        ],
+
+        // 导入映射：采集数据 → zhaopin_posts 必填字段的取值。
+        // 下列枚举/兜底值务必按主站真实约定确认后再开启导入，否则数据语义会错。
+        'import' => [
+            'type'                => 1,  // zhaopin_posts.type：招聘帖类型值（按主站枚举确认）
+            'poster_type'         => 1,  // 发布者类型（个人/商家…，按主站枚举确认）
+            'status'              => 1,  // 导入后帖子状态（1=正常显示，按主站约定确认）
+            // 城市/区域、分类无法按名称匹配到主库时的兜底外键 id，
+            // 必须填主库中真实存在的“其他/未分类”记录 id（不能留 0）。
+            'default_region_id'   => 0,
+            'default_category_id' => 0,
         ],
     ],
 

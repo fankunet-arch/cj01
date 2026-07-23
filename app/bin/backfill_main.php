@@ -1,14 +1,15 @@
 <?php
 /**
- * 一次性脚本：回填 zhaopin 主库存量招聘记录的 contact_key / simhash
+ * 一次性脚本：回填 zhaopin 主库 zhaopin_posts 存量记录的 simhash
  * （文档 §11 改动一的配套；执行前主库需已跑 db/02_zhaopin_main_ddl_patch.sql）。
- * 需要 main.mode=db 且账号对招聘表有 UPDATE 权限。
+ *
+ * 真实主库已自带 phone_norm（NOT NULL，全量已填），故本脚本只回填 simhash。
+ * simhash 由 content 计算，与采集器同一算法（Cj\Dedup\SimHash）。
+ * 需要 main.mode=db 且账号对 zhaopin_posts 有 UPDATE 权限。
  *
  * 用法：
  *   php app/bin/backfill_main.php --dry-run
  *   php app/bin/backfill_main.php --batch-size=500
- *
- * 主库字段名假设：phone/wechat/title/company/description，与实际不符时在下方 SQL 调整。
  */
 
 declare(strict_types=1);
@@ -20,7 +21,6 @@ if (PHP_SAPI !== 'cli') {
 require dirname(__DIR__) . '/bootstrap.php';
 
 use Cj\Dedup\SimHash;
-use Cj\Normalizer\ContactNormalizer;
 use Cj\Support\Db;
 
 $options = getopt('', ['dry-run', 'batch-size::']);
@@ -32,7 +32,7 @@ if (($mainCfg['mode'] ?? 'off') !== 'db') {
     fwrite(STDERR, "回填需 main.mode=db（config.php → main）\n");
     exit(1);
 }
-$table = preg_replace('/[^A-Za-z0-9_]/', '', $mainCfg['db']['jobs_table'] ?? 'jobs');
+$table = preg_replace('/[^A-Za-z0-9_]/', '', $mainCfg['db']['posts_table'] ?? 'zhaopin_posts');
 
 $pdo = Db::main();
 $lastId = 0;
@@ -40,9 +40,9 @@ $updated = 0;
 
 while (true) {
     $stmt = $pdo->prepare(
-        "SELECT id, phone, wechat, title, company, description
+        "SELECT id, content
          FROM $table
-         WHERE id > :last AND (contact_key IS NULL OR simhash IS NULL)
+         WHERE id > :last AND simhash IS NULL
          ORDER BY id ASC LIMIT $batchSize"
     );
     $stmt->execute([':last' => $lastId]);
@@ -53,18 +53,14 @@ while (true) {
 
     foreach ($rows as $row) {
         $lastId = (int) $row['id'];
-        $phoneNorm = ContactNormalizer::phone($row['phone'] ?? null);
-        $wechatNorm = ContactNormalizer::wechat($row['wechat'] ?? null);
-        $contactKey = ContactNormalizer::contactKey($phoneNorm, $wechatNorm);
-        $simhash = SimHash::ofJobText($row['title'] ?? null, $row['company'] ?? null, $row['description'] ?? null);
+        $simhash = SimHash::compute((string) ($row['content'] ?? ''));
 
         if ($dryRun) {
-            printf("[dry-run] #%d contact_key=%s simhash=%s\n", $lastId, $contactKey ?? '(null)', SimHash::toDb($simhash));
+            printf("[dry-run] #%d simhash=%s\n", $lastId, SimHash::toDb($simhash));
             continue;
         }
-        $pdo->prepare(
-            "UPDATE $table SET contact_key = :ck, simhash = :sh WHERE id = :id"
-        )->execute([':ck' => $contactKey, ':sh' => SimHash::toDb($simhash), ':id' => $lastId]);
+        $pdo->prepare("UPDATE $table SET simhash = :sh WHERE id = :id")
+            ->execute([':sh' => SimHash::toDb($simhash), ':id' => $lastId]);
         $updated++;
     }
 }

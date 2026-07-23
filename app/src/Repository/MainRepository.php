@@ -9,21 +9,36 @@ use Cj\Support\Db;
 use PDO;
 
 /**
- * zhaopin 主库访问（文档 §4.4）。
- * - 三级去重：只读比对（方案 A 接口 / 方案 B 只读直连，由 main.mode 决定）。
- * - 导入/清理：仅 Importer / Purger 调用写方法，且带 origin='crawler' 双保险。
- * 主库招聘表需已执行 db/02_zhaopin_main_ddl_patch.sql。
+ * zhaopin 主库访问（真实结构：招聘表 zhaopin_posts）。
+ *
+ * 三级去重（只读）：
+ *  - 电话：比对 zhaopin_posts.phone_norm（主库已有列并入 idx_dedup，无需新增）。
+ *  - 指纹：比对 zhaopin_posts.simhash（新增列，见 db/02_zhaopin_main_ddl_patch.sql）。
+ * 导入/清理（仅 Importer / Purger 调用）：写 zhaopin_posts，origin='crawler' 双保险。
+ *
+ * 与采集库字段的对应关系（真实主库无独立 title/company/salary/district/publish_date）：
+ *  - title+company+salary_raw+description → 合并进 content(varchar 1000)
+ *  - category(字符串) → category_id(外键，按名称查 zhaopin_categories，兜底 default_category_id)
+ *  - city/district(字符串) → region_id(外键，按名称查 zhaopin_regions，兜底 default_region_id)
+ *  - contact_phone/phone_norm/contact_wechat/contact_name → phone/phone_norm/wechat/contact_name
+ *  - content_hash：按主站约定 SHA-256(content) 生成（如主站另有归一化规则，改 contentHash()）
  */
 final class MainRepository
 {
     private string $mode;
     private array $cfg;
+    private array $importCfg;
     private ?PDO $db = null;
+
+    /** name→id 映射缓存（导入时按名称解析 region/category） */
+    private ?array $regionMap = null;
+    private ?array $categoryMap = null;
 
     public function __construct()
     {
         $this->cfg = cj_config('main') ?? ['mode' => 'off'];
         $this->mode = $this->cfg['mode'] ?? 'off';
+        $this->importCfg = $this->cfg['import'] ?? [];
     }
 
     public function enabled(): bool
@@ -39,25 +54,34 @@ final class MainRepository
         return $this->db;
     }
 
-    private function jobsTable(): string
+    /** 表名来自配置，白名单化防注入。 */
+    private function table(string $key, string $default): string
     {
-        $t = $this->cfg['db']['jobs_table'] ?? 'jobs';
-        return preg_replace('/[^A-Za-z0-9_]/', '', $t);   // 表名来自配置，防注入
+        $t = $this->cfg['db'][$key] ?? $default;
+        return preg_replace('/[^A-Za-z0-9_]/', '', (string) $t);
+    }
+
+    private function postsTable(): string
+    {
+        return $this->table('posts_table', 'zhaopin_posts');
     }
 
     // ---------- 三级去重（只读） ----------
 
-    /** contact_key 是否命中主库；命中返回主库记录 id，否则 null。 */
-    public function findByContactKey(string $contactKey): ?int
+    /** phone_norm 是否命中主库；命中返回主库记录 id，否则 null。 */
+    public function findByPhoneNorm(string $phoneNorm): ?int
     {
+        if ($phoneNorm === '') {
+            return null;
+        }
         if ($this->mode === 'api') {
-            $r = $this->apiCheck(['contact_key' => $contactKey]);
-            return $r['exists'] ?? false ? (int) ($r['id'] ?? 0) : null;
+            $r = $this->apiCheck(['phone_norm' => $phoneNorm]);
+            return ($r['exists'] ?? false) ? (int) ($r['id'] ?? 0) : null;
         }
         $stmt = $this->pdo()->prepare(
-            'SELECT id FROM ' . $this->jobsTable() . ' WHERE contact_key = :k LIMIT 1'
+            'SELECT id FROM ' . $this->postsTable() . ' WHERE phone_norm = :k LIMIT 1'
         );
-        $stmt->execute([':k' => $contactKey]);
+        $stmt->execute([':k' => $phoneNorm]);
         $id = $stmt->fetchColumn();
         return $id !== false ? (int) $id : null;
     }
@@ -72,7 +96,7 @@ final class MainRepository
             return [];   // 方案 A 下 simhash 比对在主站接口内完成（simhashCheck()）
         }
         $rows = $this->pdo()->query(
-            "SELECT id, LPAD(HEX(simhash),16,'0') AS h FROM " . $this->jobsTable() .
+            "SELECT id, LPAD(HEX(simhash),16,'0') AS h FROM " . $this->postsTable() .
             ' WHERE simhash IS NOT NULL'
         )->fetchAll();
         $out = [];
@@ -116,34 +140,149 @@ final class MainRepository
 
     // ---------- 导入（仅 Importer 调用，人工确认后执行） ----------
 
-    /** 采集记录写入主库招聘表，origin='crawler'，返回主库新 id。 */
+    /**
+     * 采集记录写入 zhaopin_posts，origin='crawler'，返回主库新 id。
+     * $job 为 cj_jobs_clean 一行（含 title/company/salary_raw/description/city/district/
+     * category/contact_phone/phone_norm/contact_wechat/contact_name/simhash）。
+     */
     public function insertJob(array $job): int
     {
         $pdo = $this->pdo();
-        $sql = 'INSERT INTO ' . $this->jobsTable() . '
-                (title, company, category, city, district, salary_raw, description,
-                 contact_phone, contact_wechat, contact_name,
-                 contact_key, simhash, publish_date, origin, created_at)
+
+        $content   = $this->buildContent($job);
+        $phone     = (string) ($job['contact_phone'] ?? '');
+        $phoneNorm = (string) ($job['phone_norm'] ?? '');
+        $regionId  = $this->resolveRegionId($job['city'] ?? null, $job['district'] ?? null);
+        $categoryId = $this->resolveCategoryId($job['category'] ?? null);
+
+        $sql = 'INSERT INTO ' . $this->postsTable() . '
+                (public_code, type, content, content_hash, contact_name, phone, phone_norm,
+                 wechat, region_id, category_id, poster_type, user_id, simhash, status,
+                 origin, created_at, bumped_at)
                 VALUES
-                (:title, :company, :category, :city, :district, :salary_raw, :description,
-                 :contact_phone, :contact_wechat, :contact_name,
-                 :contact_key, :simhash, :publish_date, \'crawler\', NOW())';
-        $pdo->prepare($sql)->execute([
-            ':title'          => $job['title'],
-            ':company'        => $job['company'],
-            ':category'       => $job['category'],
-            ':city'           => $job['city'],
-            ':district'       => $job['district'],
-            ':salary_raw'     => $job['salary_raw'],
-            ':description'    => $job['description'],
-            ':contact_phone'  => $job['contact_phone'],
-            ':contact_wechat' => $job['contact_wechat'],
-            ':contact_name'   => $job['contact_name'],
-            ':contact_key'    => $job['contact_key'],
-            ':simhash'        => $job['simhash'],   // 已是无符号十进制字符串
-            ':publish_date'   => $job['publish_date'],
-        ]);
-        return (int) $pdo->lastInsertId();
+                (:public_code, :type, :content, :content_hash, :contact_name, :phone, :phone_norm,
+                 :wechat, :region_id, :category_id, :poster_type, NULL, :simhash, :status,
+                 \'crawler\', NOW(), NOW())';
+
+        $stmt = $pdo->prepare($sql);
+        $params = [
+            ':type'         => (int) ($this->importCfg['type'] ?? 1),
+            ':content'      => $content,
+            ':content_hash' => $this->contentHash($content),
+            ':contact_name' => mb_substr((string) ($job['contact_name'] ?? ''), 0, 50),
+            ':phone'        => mb_substr($phone, 0, 30),
+            ':phone_norm'   => mb_substr($phoneNorm, 0, 20),
+            ':wechat'       => $job['contact_wechat'] !== null ? mb_substr((string) $job['contact_wechat'], 0, 60) : null,
+            ':region_id'    => $regionId,
+            ':category_id'  => $categoryId,
+            ':poster_type'  => (int) ($this->importCfg['poster_type'] ?? 1),
+            ':simhash'      => $job['simhash'] !== null ? (string) $job['simhash'] : null,
+            ':status'       => (int) ($this->importCfg['status'] ?? 1),
+        ];
+
+        // public_code 唯一，冲突则重试
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            try {
+                $stmt->execute([':public_code' => $this->generatePublicCode()] + $params);
+                return (int) $pdo->lastInsertId();
+            } catch (\PDOException $e) {
+                if ($attempt < 4 && str_contains($e->getMessage(), 'uk_public_code')) {
+                    continue;
+                }
+                throw $e;
+            }
+        }
+        throw new \RuntimeException('public_code 连续冲突，导入中止');
+    }
+
+    /** 合并采集字段为主库单一 content(varchar 1000)。 */
+    private function buildContent(array $job): string
+    {
+        $parts = [];
+        if (!empty($job['title'])) {
+            $parts[] = trim((string) $job['title']);
+        }
+        if (!empty($job['company'])) {
+            $parts[] = '【' . trim((string) $job['company']) . '】';
+        }
+        if (!empty($job['salary_raw'])) {
+            $parts[] = '薪资：' . trim((string) $job['salary_raw']);
+        }
+        if (!empty($job['description'])) {
+            $parts[] = trim((string) $job['description']);
+        }
+        $content = trim(implode("\n", $parts));
+        if ($content === '') {
+            $content = '（采集导入，无正文）';
+        }
+        return mb_substr($content, 0, 1000);
+    }
+
+    /**
+     * content_hash：主站精确去重键。默认 SHA-256(content)。
+     * 若主站在入库前对 content 做归一化再哈希，请在此对齐其算法，
+     * 否则导入记录不会与主站后续相同内容的用户发帖精确碰撞（不影响功能，仅影响精确去重命中）。
+     */
+    private function contentHash(string $content): string
+    {
+        return hash('sha256', $content);
+    }
+
+    /** 城市/区域名称 → region_id；查不到用兜底配置。 */
+    private function resolveRegionId(?string $city, ?string $district): int
+    {
+        if ($this->regionMap === null) {
+            $this->regionMap = [];
+            $table = $this->table('regions_table', 'zhaopin_regions');
+            foreach ($this->pdo()->query("SELECT id, name FROM $table")->fetchAll() as $r) {
+                $this->regionMap[$this->mapKey($r['name'])] = (int) $r['id'];
+            }
+        }
+        foreach ([$district, $city] as $name) {   // 优先更细的区域
+            if ($name !== null && $name !== '') {
+                $id = $this->regionMap[$this->mapKey($name)] ?? null;
+                if ($id !== null) {
+                    return $id;
+                }
+            }
+        }
+        return (int) ($this->importCfg['default_region_id'] ?? 0);
+    }
+
+    /** 分类名称 → category_id；查不到用兜底配置。 */
+    private function resolveCategoryId(?string $category): int
+    {
+        if ($this->categoryMap === null) {
+            $this->categoryMap = [];
+            $table = $this->table('categories_table', 'zhaopin_categories');
+            foreach ($this->pdo()->query("SELECT id, name FROM $table")->fetchAll() as $r) {
+                $this->categoryMap[$this->mapKey($r['name'])] = (int) $r['id'];
+            }
+        }
+        if ($category !== null && $category !== '') {
+            $id = $this->categoryMap[$this->mapKey($category)] ?? null;
+            if ($id !== null) {
+                return $id;
+            }
+        }
+        return (int) ($this->importCfg['default_category_id'] ?? 0);
+    }
+
+    private function mapKey(string $name): string
+    {
+        return mb_strtolower(trim($name));
+    }
+
+    /** 生成 10 位 public_code（大小写字母+数字，去易混字符）。 */
+    private function generatePublicCode(): string
+    {
+        $alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+        $code = '';
+        $max = strlen($alphabet) - 1;
+        for ($i = 0; $i < 10; $i++) {
+            $code .= $alphabet[random_int(0, $max)];
+        }
+        return $code;
     }
 
     // ---------- 清理（仅 Purger 调用） ----------
@@ -155,7 +294,7 @@ final class MainRepository
     public function deleteCrawlerJob(int $mainJobId): bool
     {
         $stmt = $this->pdo()->prepare(
-            'DELETE FROM ' . $this->jobsTable() . " WHERE id = :id AND origin = 'crawler'"
+            'DELETE FROM ' . $this->postsTable() . " WHERE id = :id AND origin = 'crawler'"
         );
         $stmt->execute([':id' => $mainJobId]);
         return $stmt->rowCount() > 0;

@@ -47,6 +47,8 @@ final class Importer
 
         $imported = 0;
         foreach ($jobs as $job) {
+            // MainRepository 会把这些字段映射到 zhaopin_posts 真实结构
+            // （标题/公司/薪资/描述合并进 content，城市/分类按名称解析为 region_id/category_id）
             $mainId = $this->main->insertJob([
                 'title'          => $job['title'],
                 'company'        => $job['company'],
@@ -56,11 +58,10 @@ final class Importer
                 'salary_raw'     => $job['salary_raw'],
                 'description'    => $job['description'],
                 'contact_phone'  => $job['contact_phone'],
+                'phone_norm'     => $job['phone_norm'],
                 'contact_wechat' => $job['contact_wechat'],
                 'contact_name'   => $job['contact_name'],
-                'contact_key'    => $job['contact_key'],
                 'simhash'        => $job['simhash'],   // DB 取出即无符号十进制
-                'publish_date'   => $job['publish_date'],
             ]);
             // 账本存采集库：一一对应，防重复导入（uk_main）
             $this->crawler->recordImport((int) $job['id'], $mainId, $batch);

@@ -34,7 +34,7 @@ cj01/
 │   └── logs/                # 日志（不可对外）
 ├── db/                      # 数据库导入文件（MySQL 8.4）
 │   ├── 01_crawler_db_schema.sql      # 采集库 crawler_db 全部 cj_ 表
-│   ├── 02_zhaopin_main_ddl_patch.sql # 主库配合改动（contact_key/simhash/origin）
+│   ├── 02_zhaopin_main_ddl_patch.sql # 主库 zhaopin_posts 配合改动（新增 simhash/origin）
 │   └── 03_sample_data.sql            # 可选：开发联调样例数据
 └── docs/                    # 需求与设计文档
 ```
@@ -47,14 +47,18 @@ cj01/
 # 建采集库（含全部 cj_ 表）
 mysql -u root -p < db/01_crawler_db_schema.sql
 
-# zhaopin 主库配合改动（在主库执行；表名按实际调整后再跑）
-mysql -u root -p zhaopin_db < db/02_zhaopin_main_ddl_patch.sql
+# zhaopin 主库配合改动（在主库执行；给 zhaopin_posts 加 simhash/origin 两列）
+# 主库名按实际填（导出示例为 mhdlmskzoi87b0i）
+mysql -u root -p 你的主库名 < db/02_zhaopin_main_ddl_patch.sql
 
 # 可选：开发联调样例数据
 mysql -u root -p crawler_db < db/03_sample_data.sql
 ```
 
-主库存量数据回填去重列（跑一次）：
+> 主库真实招聘表为 `zhaopin_posts`，已自带 `phone_norm`（电话去重）与 `content_hash`
+> （精确去重），故补丁只新增 `simhash`（模糊去重）与 `origin`（来源标记）两列。
+
+主库存量数据回填 `simhash`（跑一次；`phone_norm`/`origin` 无需回填）：
 
 ```bash
 php app/bin/backfill_main.php --dry-run
@@ -67,6 +71,13 @@ php app/bin/backfill_main.php
 cp app/config/config.example.php app/config/config.php
 # 编辑 config.php：采集库连接、主库比对方式（main.mode）、内部页面口令、Brevo
 ```
+
+> **导入主库前务必确认 `main.import` 映射值**（采集数据 → `zhaopin_posts` 必填字段）：
+> `type`（招聘帖类型枚举）、`poster_type`（发布者类型枚举）、`status`（导入后帖子状态）、
+> `default_region_id` / `default_category_id`（城市/分类按名称匹配不到时的兜底外键，
+> 必须填主库中真实存在的“其他/未分类”记录 id，不能留 0）。这些值取自主站真实约定，
+> 填错会导致导入的帖子归错类目/地区。另外 `content_hash` 默认按 `SHA-256(content)` 生成，
+> 若主站入库前对 content 另做归一化，请在 `MainRepository::contentHash()` 对齐其算法。
 
 要求 PHP ≥ 8.1，扩展：curl、pdo_mysql、mbstring、dom。
 核心功能零 Composer 依赖即可运行；如需更强的 CSS 选择器支持可
