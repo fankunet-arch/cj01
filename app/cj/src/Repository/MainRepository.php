@@ -55,10 +55,10 @@ final class MainRepository
         return $this->db;
     }
 
-    /** 表名来自配置，白名单化防注入。 */
+    /** 表名来自已解析的主库配置（复用主站 config 或采集器自填），白名单化防注入。 */
     private function table(string $key, string $default): string
     {
-        $t = $this->cfg['db'][$key] ?? $default;
+        $t = cj_main_db_config()[$key] ?? $default;
         return preg_replace('/[^A-Za-z0-9_]/', '', (string) $t);
     }
 

@@ -32,7 +32,7 @@ if (($mainCfg['mode'] ?? 'off') !== 'db') {
     fwrite(STDERR, "回填需 main.mode=db（config.php → main）\n");
     exit(1);
 }
-$table = preg_replace('/[^A-Za-z0-9_]/', '', $mainCfg['db']['posts_table'] ?? 'zhaopin_posts');
+$table = preg_replace('/[^A-Za-z0-9_]/', '', cj_main_db_config()['posts_table'] ?? 'zhaopin_posts');
 
 $pdo = Db::main();
 $lastId = 0;

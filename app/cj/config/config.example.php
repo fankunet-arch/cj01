@@ -19,27 +19,36 @@ return [
     // ---- zhaopin 主库比对（三级去重，见文档 §4.4） ----
     'main' => [
         // 'off'  = 不做主库比对（P4 之前）
-        // 'db'   = 方案 B：只读账号直连主库
+        // 'db'   = 方案 B：直连主库（去重只读；导入/清理需写权限）
         // 'api'  = 方案 A：调用主站内部去重接口
         'mode' => 'off',
 
+        // 采集器与主站同一部署，推荐复用主站 config.php，避免重复维护主库账号密码。
+        // 默认读取 app/config/config.php 的 db 段与 prefix，表名由 prefix 派生。
+        'zhaopin_config' => __DIR__ . '/../../config/config.php',
+
         // mode=db 时使用。
-        // 去重（三级比对）只需只读；导入/清理需对 posts 表有写/删权限。
         'db' => [
+            // reuse_zhaopin=true：host/port/name/user/pass 及表名全部取自上面的
+            // zhaopin_config（主站库），本块其余字段忽略。
+            // ⚠ 此时该账号需具备导入/清理所需的写、删权限（不能是只读账号）。
+            'reuse_zhaopin' => true,
+
+            // reuse_zhaopin=false 时才用下面这份独立连接（例如想用只读账号仅做去重比对）：
             'host'             => '127.0.0.1',
             'port'             => 3306,
-            'name'             => 'mhdlmskzoi87b0i',   // ← zhaopin 主库名，按实际调整
+            'name'             => 'CHANGE_ME',          // ← zhaopin 主库名
             'user'             => 'crawler_ro',
             'pass'             => 'CHANGE_ME',
             'charset'          => 'utf8mb4',
-            'posts_table'      => 'zhaopin_posts',      // 招聘帖表（真实结构）
+            'posts_table'      => 'zhaopin_posts',      // 招聘帖表
             'regions_table'    => 'zhaopin_regions',    // 地区表（名称→region_id 映射）
             'categories_table' => 'zhaopin_categories', // 分类表（名称→category_id 映射）
         ],
 
         // mode=api 时使用
         'api' => [
-            'url'   => 'https://zhaopin.es/internal/dedup-check',
+            'url'   => 'https://www.zhaopin.es/internal/dedup-check',
             'token' => 'CHANGE_ME',
         ],
 

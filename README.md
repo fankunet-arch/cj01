@@ -78,6 +78,11 @@ cp app/cj/config/config.example.php app/cj/config/config.php
 # web.base_path 默认 '/cj'（对应 http://zhaopin.es/cj/），换挂载路径只改这里
 ```
 
+> **主库连接复用主站配置**：采集器与主站同一部署，`main.db.reuse_zhaopin` 默认 `true`，
+> 直接读取主站 `app/config/config.php` 的 `db` 段与 `prefix`（表名由 prefix 派生），
+> 无需在采集器里重复填主库账号密码。此时该 DB 账号需具备导入/清理所需的写、删权限。
+> 若想用独立只读账号仅做去重比对，把 `reuse_zhaopin` 设为 `false` 并填 `main.db` 内的连接。
+
 > **导入逻辑已与主站发布代码（`app/handlers/publish.php`、`app/lib/util.php`）对齐：**
 > `type=1`(招聘)/`poster_type=1`(游客)/`status=1`(在线) 按主站实际取值确定；
 > `phone_norm`(=`zp_phone_norm`)、`content_hash`(=`zp_content_hash`：去空白+小写后 SHA-256)、
