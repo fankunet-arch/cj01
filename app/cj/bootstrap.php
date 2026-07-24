@@ -35,6 +35,26 @@ if (is_file(CJ_APP_ROOT . '/vendor/autoload.php')) {
     require CJ_APP_ROOT . '/vendor/autoload.php';
 }
 
+/**
+ * 致命错误退出：区分 CLI / Web。
+ * ⚠ STDERR 常量仅 CLI SAPI 有定义；Web 下引用会二次致命，故必须分流。
+ * Web 端只输出通用文案（细节写日志，避免向公网泄露内部路径）。
+ */
+function cj_fail(string $publicMsg, string $logMsg = ''): void
+{
+    error_log('[cj] ' . ($logMsg !== '' ? $logMsg : $publicMsg));
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, ($logMsg !== '' ? $logMsg : $publicMsg) . "\n");
+    } else {
+        if (!headers_sent()) {
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=UTF-8');
+        }
+        echo $publicMsg . "\n";
+    }
+    exit(1);
+}
+
 /** 全局配置访问器 */
 function cj_config(?string $key = null)
 {
@@ -42,8 +62,10 @@ function cj_config(?string $key = null)
     if ($config === null) {
         $file = CJ_APP_ROOT . '/config/config.php';
         if (!is_file($file)) {
-            fwrite(STDERR, "缺少配置文件 app/cj/config/config.php（可从 config.example.php 复制）\n");
-            exit(1);
+            cj_fail(
+                '采集器尚未完成配置，请稍后再试。',
+                '缺少配置文件 app/cj/config/config.php（从 config.example.php 复制并填写）'
+            );
         }
         $config = require $file;
     }
