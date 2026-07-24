@@ -17,12 +17,20 @@ use Cj\Support\Logger;
  */
 final class CrawlControl
 {
-    /** 硬下限：采集间隔不能小于 1 小时 */
+    /** 生产硬下限：采集间隔不能小于 1 小时 */
     private const MIN_INTERVAL = 3600;
+
+    /** 调试模式下的安全下限：仍不允许无限连点（防误触打爆目标站） */
+    private const DEBUG_MIN_INTERVAL = 10;
 
     public static function minInterval(): int
     {
-        $configured = (int) (cj_config('crawl')['min_trigger_interval'] ?? self::MIN_INTERVAL);
+        $crawl = cj_config('crawl') ?? [];
+        $configured = (int) ($crawl['min_trigger_interval'] ?? self::MIN_INTERVAL);
+        // 调试模式：允许把间隔调到 1 小时以下（生产务必设回 false）。
+        if (!empty($crawl['debug'])) {
+            return max(self::DEBUG_MIN_INTERVAL, $configured);
+        }
         return max(self::MIN_INTERVAL, $configured);
     }
 
