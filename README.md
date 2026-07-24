@@ -114,6 +114,8 @@ server {
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        # 透传 Basic Auth 头，否则内部页面会“输对密码仍反复弹框”
+        fastcgi_param HTTP_AUTHORIZATION $http_authorization;
     }
     location ~ ^/cj/.*\.php$ { return 403; }
 
