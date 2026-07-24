@@ -97,8 +97,13 @@ return [
         // 页面内的静态资源与导航链接都以此为前缀；换路径只改这里。
         'base_path'    => '/cj',
         'auth_user'    => 'admin',
-        'auth_pass'    => 'CHANGE_ME',
-        'ip_whitelist' => [],          // 如 ['1.2.3.4']；留空则只做 Basic Auth
+        'auth_pass'    => 'CHANGE_ME',   // ← 必改：留 CHANGE_ME/空会 503
+        // IP 白名单：如 ['1.2.3.4']；留空 [] 则只用 Basic Auth（推荐先这样）。
+        // ⚠ 若站点在 CDN/代理后，REMOTE_ADDR 是代理 IP，直接填公网 IP 会 403。
+        'ip_whitelist' => [],
+        // 仅当站点确在可信代理/CDN 后、且要用 IP 白名单时才设 true：
+        // 改从 X-Forwarded-For 取客户端 IP（该头可伪造，非代理环境勿开）。
+        'trust_proxy'  => false,
     ],
 
     // ---- 告警（Brevo 邮件，文档 §7） ----
