@@ -76,12 +76,14 @@ return [
 
     // ---- 采集行为 ----
     'crawl' => [
-        // 调试开关：true 时才允许 min_trigger_interval 低于 1 小时（下限 10 秒）。
+        // 调试模式（强制开）：true 时永久启用调试间隔，网页开关无法关闭。
+        // 一般留 false，用概览页的「开启调试模式」按钮临时开关即可。
         // ⚠ 生产务必保持 false（保持 1 小时间隔的硬性要求）。
         'debug'                => false,
-        // 采集触发最小间隔（秒）。debug=false 时硬下限 1 小时（配置小于 3600 按 3600）；
-        // debug=true 时可设更小（如 60）以便反复调试。
-        // 另：命令行 `crawl.php --force` 可无视本间隔立即采集，最适合调试。
+        // 调试模式下的采集间隔（秒，下限 10）。网页开关或 debug=true 时生效。
+        'debug_interval'       => 60,
+        // 正常采集触发最小间隔（秒）。非调试时硬下限 1 小时（配置小于 3600 按 3600）。
+        // 另：命令行 `crawl.php --force` 可无视间隔立即采集，最适合调试单站。
         'min_trigger_interval' => 3600,
         // Web 一键采集后台拉起 CLI 所用的 php 可执行文件（FPM 下 PHP_BINARY 不是 CLI，勿用）
         'php_cli'             => 'php',

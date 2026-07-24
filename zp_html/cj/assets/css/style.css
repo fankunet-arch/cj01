@@ -62,6 +62,7 @@ th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 .muted { color: var(--muted); }
 .status-ok { color: var(--ok); }
 .status-running { color: var(--warn); }
+.status-warn { color: var(--warn); font-weight: 600; }
 .status-failed { color: var(--bad); }
 
 .btn {

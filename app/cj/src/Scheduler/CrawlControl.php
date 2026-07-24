@@ -26,21 +26,58 @@ final class CrawlControl
     public static function minInterval(): int
     {
         $crawl = cj_config('crawl') ?? [];
-        $configured = (int) ($crawl['min_trigger_interval'] ?? self::MIN_INTERVAL);
-        // 调试模式：允许把间隔调到 1 小时以下（生产务必设回 false）。
-        if (!empty($crawl['debug'])) {
-            return max(self::DEBUG_MIN_INTERVAL, $configured);
+        // 调试模式（配置强制开 或 网页开关开）：采集间隔缩短，便于反复调试。
+        if (self::debugEnabled()) {
+            $dbg = (int) ($crawl['debug_interval'] ?? 60);   // 默认 60 秒
+            return max(self::DEBUG_MIN_INTERVAL, $dbg);
         }
+        $configured = (int) ($crawl['min_trigger_interval'] ?? self::MIN_INTERVAL);
         return max(self::MIN_INTERVAL, $configured);
     }
 
-    private static function lockFile(): string
+    private static function stateDir(): string
     {
         $dir = cj_config('log_dir') ?: CJ_APP_ROOT . '/logs';
         if (!is_dir($dir)) {
             @mkdir($dir, 0750, true);
         }
-        return $dir . '/crawl_trigger.lock';
+        return $dir;
+    }
+
+    private static function lockFile(): string
+    {
+        return self::stateDir() . '/crawl_trigger.lock';
+    }
+
+    private static function debugFlagFile(): string
+    {
+        return self::stateDir() . '/debug.enabled';
+    }
+
+    /** 调试模式是否开启：配置 crawl.debug 强制开，或网页开关（标记文件）开。 */
+    public static function debugEnabled(): bool
+    {
+        if (!empty(cj_config('crawl')['debug'])) {
+            return true;
+        }
+        return is_file(self::debugFlagFile());
+    }
+
+    /** 配置是否强制开启调试（此时网页开关无法关闭）。 */
+    public static function debugForcedByConfig(): bool
+    {
+        return !empty(cj_config('crawl')['debug']);
+    }
+
+    /** 网页开关：开/关调试模式（写/删标记文件）。 */
+    public static function setDebug(bool $on): void
+    {
+        $file = self::debugFlagFile();
+        if ($on) {
+            @file_put_contents($file, (string) time());
+        } else {
+            @unlink($file);
+        }
     }
 
     /** 上次触发时间戳（文件锁记录与 cj_crawl_runs 取较新者）。 */
@@ -91,11 +128,15 @@ final class CrawlControl
         $running = self::isRunning();
         $canTrigger = !$running && ($nextAllowed === null || time() >= $nextAllowed);
 
+        $debug = self::debugEnabled();
+        $interval = self::minInterval();
         $reason = null;
         if ($running) {
             $reason = '已有采集任务正在运行';
         } elseif (!$canTrigger && $nextAllowed !== null) {
-            $reason = sprintf('采集间隔不能小于 1 小时，%s 后可再次触发', date('Y-m-d H:i', $nextAllowed));
+            $reason = $debug
+                ? sprintf('调试模式：间隔 %d 秒，%s 后可再次触发', $interval, date('H:i:s', $nextAllowed))
+                : sprintf('采集间隔不能小于 1 小时，%s 后可再次触发', date('Y-m-d H:i', $nextAllowed));
         }
 
         return [
@@ -104,6 +145,9 @@ final class CrawlControl
             'next_allowed_at' => $nextAllowed !== null ? date('Y-m-d H:i:s', $nextAllowed) : null,
             'can_trigger'     => $canTrigger,
             'reason'          => $reason,
+            'debug'           => $debug,
+            'debug_forced'    => self::debugForcedByConfig(),
+            'interval'        => $interval,
         ];
     }
 

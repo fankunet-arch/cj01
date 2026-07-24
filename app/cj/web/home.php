@@ -17,6 +17,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'crawl') {
         $r = CrawlControl::trigger();
         $flash = ['ok' => $r['ok'], 'text' => $r['message']];
+    } elseif ($action === 'debug_toggle') {
+        if (CrawlControl::debugForcedByConfig()) {
+            $flash = ['ok' => false, 'text' => '调试模式已由配置 crawl.debug 强制开启，网页开关无法关闭。'];
+        } else {
+            $on = ($_POST['debug'] ?? '') === '1';
+            CrawlControl::setDebug($on);
+            $flash = ['ok' => true, 'text' => $on
+                ? '调试模式已开启：采集间隔临时缩短（默认 60 秒），方便反复触发。调试完记得关闭。'
+                : '调试模式已关闭：采集间隔恢复 1 小时。'];
+        }
     } elseif ($action === 'import') {
         try {
             $limit = max(1, min(1000, (int) ($_POST['limit'] ?? 200)));
@@ -89,8 +99,24 @@ $renderBody = function () use ($stats, $dbError, $flash, $crawlStatus) {
             <?php if ($crawlStatus['next_allowed_at'] !== null): ?>
                 · 下次可触发：<?= cj_e($crawlStatus['next_allowed_at']) ?>
             <?php endif; ?>
-            · 采集间隔不能小于 1 小时（Web 与 cron 共用同一闸门）。进度见<a href="<?= cj_e(cj_url('dashboard.php')) ?>">运行看板</a>。
+            <?php if ($crawlStatus['debug']): ?>
+                · <span class="status-warn">调试模式（间隔 <?= (int) $crawlStatus['interval'] ?> 秒）</span>
+            <?php else: ?>
+                · 采集间隔 1 小时（Web 与 cron 共用同一闸门）
+            <?php endif; ?>
+            。进度见<a href="<?= cj_e(cj_url('dashboard.php')) ?>">运行看板</a>。
         </p>
+
+        <form method="post" style="margin-top:8px">
+            <input type="hidden" name="action" value="debug_toggle">
+            <input type="hidden" name="debug" value="<?= $crawlStatus['debug'] ? '0' : '1' ?>">
+            <button class="btn" type="submit" <?= $crawlStatus['debug_forced'] ? 'disabled' : '' ?>>
+                <?= $crawlStatus['debug'] ? '关闭调试模式（恢复 1 小时间隔）' : '开启调试模式（间隔缩短，便于反复采集）' ?>
+            </button>
+            <?php if ($crawlStatus['debug_forced']): ?>
+                <span class="muted">调试模式由配置 crawl.debug 强制开启，改配置才能关。</span>
+            <?php endif; ?>
+        </form>
     </div>
 
     <div class="card">
