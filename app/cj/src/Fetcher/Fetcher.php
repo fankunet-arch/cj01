@@ -47,6 +47,9 @@ final class Fetcher
             if (!$retriable || $attempt >= $retries) {
                 if ($body !== null && $charset !== null) {
                     $body = mb_convert_encoding($body, 'UTF-8', $charset);
+                    // 转码后同步把 meta 的 charset 改成 UTF-8，避免下游（DOM 解析/浏览器）
+                    // 按原编码二次解码导致乱码。
+                    $body = preg_replace('#(<meta[^>]*charset=["\']?)[\w-]+#i', '${1}UTF-8', $body, 1) ?? $body;
                 }
                 return ['status' => $status, 'body' => $body];
             }

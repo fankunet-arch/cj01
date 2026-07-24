@@ -64,9 +64,13 @@ final class SiteParser
 
     private function xpath(string $html): DOMXPath
     {
+        // Fetcher 已把正文转成 UTF-8，但页面原 <meta charset=gb2312> 等仍在，
+        // 会让 libxml 按原编码二次解码 → 整个 DOM 乱码/为空。把 meta 里的 charset
+        // 统一改成 UTF-8，确保按 UTF-8 解析（对 GBK/gb2312 老站尤为关键）。
+        $html = preg_replace('#(<meta[^>]*charset=["\']?)[\w-]+#i', '${1}UTF-8', $html, 1) ?? $html;
+
         $doc = new DOMDocument();
         libxml_use_internal_errors(true);
-        // 强制按 UTF-8 解析（Fetcher 已做编码转换）
         $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOWARNING | LIBXML_NOERROR);
         libxml_clear_errors();
         return new DOMXPath($doc);
