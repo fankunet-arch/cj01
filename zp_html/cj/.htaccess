@@ -4,6 +4,15 @@
 
 Options -Indexes
 
+# 透传 Authorization 头给 PHP（FastCGI/PHP-FPM 下 Basic Auth 才能拿到用户名密码，
+# 否则会“输对密码仍反复弹框”）。SetEnvIf 兼容性最好；另备 CGIPassAuth（Apache 2.4.13+）。
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
+
 # 禁止访问隐藏文件
 <FilesMatch "^\.">
     Require all denied

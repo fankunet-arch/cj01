@@ -30,7 +30,8 @@ final class Db
             if (($cfg['mode'] ?? 'off') !== 'db') {
                 throw new \RuntimeException('main.mode 未配置为 db，无法直连主库');
             }
-            self::$main = self::connect($cfg['db']);
+            // 复用主站 config.php 或采集器自填，由 cj_main_db_config() 统一解析
+            self::$main = self::connect(cj_main_db_config());
         }
         return self::$main;
     }

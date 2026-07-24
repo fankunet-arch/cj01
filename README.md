@@ -78,12 +78,19 @@ cp app/cj/config/config.example.php app/cj/config/config.php
 # web.base_path 默认 '/cj'（对应 http://zhaopin.es/cj/），换挂载路径只改这里
 ```
 
-> **导入主库前务必确认 `main.import` 映射值**（采集数据 → `zhaopin_posts` 必填字段）：
-> `type`（招聘帖类型枚举）、`poster_type`（发布者类型枚举）、`status`（导入后帖子状态）、
-> `default_region_id` / `default_category_id`（城市/分类按名称匹配不到时的兜底外键，
-> 必须填主库中真实存在的“其他/未分类”记录 id，不能留 0）。这些值取自主站真实约定，
-> 填错会导致导入的帖子归错类目/地区。另外 `content_hash` 默认按 `SHA-256(content)` 生成，
-> 若主站入库前对 content 另做归一化，请在 `MainRepository::contentHash()` 对齐其算法。
+> **主库连接复用主站配置**：采集器与主站同一部署，`main.db.reuse_zhaopin` 默认 `true`，
+> 直接读取主站 `app/config/config.php` 的 `db` 段与 `prefix`（表名由 prefix 派生），
+> 无需在采集器里重复填主库账号密码。此时该 DB 账号需具备导入/清理所需的写、删权限。
+> 若想用独立只读账号仅做去重比对，把 `reuse_zhaopin` 设为 `false` 并填 `main.db` 内的连接。
+
+> **导入逻辑已与主站发布代码（`app/handlers/publish.php`、`app/lib/util.php`）对齐：**
+> `type=1`(招聘)/`poster_type=1`(游客)/`status=1`(在线) 按主站实际取值确定；
+> `phone_norm`(=`zp_phone_norm`)、`content_hash`(=`zp_content_hash`：去空白+小写后 SHA-256)、
+> `simhash`、`public_code`、UTC 时间戳均由导入代码按主站同一算法自动生成，无需配置。
+>
+> **仍需你确认 `main.import` 的兜底外键**：`default_region_id` / `default_category_id`
+> ——采集的城市/分类名在 `zhaopin_regions` / `zhaopin_categories` 匹配不到时的兜底 id，
+> 必须填主库中真实存在的「其他/未分类」记录 id（不能留 0），否则这类帖子会挂到无效外键上。
 
 要求 PHP ≥ 8.1，扩展：curl、pdo_mysql、mbstring、dom。
 核心功能零 Composer 依赖即可运行；如需更强的 CSS 选择器支持可
@@ -107,6 +114,8 @@ server {
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        # 透传 Basic Auth 头，否则内部页面会“输对密码仍反复弹框”
+        fastcgi_param HTTP_AUTHORIZATION $http_authorization;
     }
     location ~ ^/cj/.*\.php$ { return 403; }
 
