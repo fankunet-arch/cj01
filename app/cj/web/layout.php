@@ -29,6 +29,7 @@ function cj_url(string $path = ''): string
     <h1>zhaopin.es 采集器（冷启动临时模块）</h1>
     <nav>
         <a href="<?= cj_e(cj_url('dashboard.php')) ?>">运行看板</a>
+        <a href="<?= cj_e(cj_url('sources.php')) ?>">采集源</a>
         <a href="<?= cj_e(cj_url('review.php')) ?>">复核队列</a>
     </nav>
 </header>
