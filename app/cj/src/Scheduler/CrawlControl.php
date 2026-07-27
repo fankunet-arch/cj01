@@ -106,31 +106,13 @@ final class CrawlControl
         return $fromDb === null ? $fromFile : max($fromFile, $fromDb);
     }
 
-    /**
-     * 回收僵尸 running 记录：请求被超时/致命杀掉时会留下永远 running 的记录，
-     * 超过 3 分钟的 running 一律标记失败（同步采集通常 ≤20 秒，绝无正常 3 分钟仍 running）。
-     */
-    public static function reapStaleRuns(): void
-    {
-        try {
-            Db::crawler()->exec(
-                "UPDATE cj_crawl_runs
-                 SET status = 'failed', finished_at = NOW(),
-                     note = CONCAT(COALESCE(note, ''), ' [自动回收：疑似超时/中断]')
-                 WHERE status = 'running' AND started_at < NOW() - INTERVAL 3 MINUTE"
-            );
-        } catch (\Throwable) {
-        }
-    }
-
-    /** 是否有采集任务正在运行（先回收僵尸记录，仅近 3 分钟的 running 才算“运行中”）。 */
+    /** 是否有采集任务正在运行（6 小时前的 running 视为僵尸记录，不阻塞）。 */
     public static function isRunning(): bool
     {
-        self::reapStaleRuns();
         try {
             return (bool) Db::crawler()->query(
                 "SELECT 1 FROM cj_crawl_runs
-                 WHERE status = 'running' AND started_at > NOW() - INTERVAL 3 MINUTE
+                 WHERE status = 'running' AND started_at > NOW() - INTERVAL 6 HOUR
                  LIMIT 1"
             )->fetchColumn();
         } catch (\Throwable) {
@@ -264,5 +246,41 @@ final class CrawlControl
         }
         Logger::info('crawl', '同步采集完成（Web）：' . json_encode($results, JSON_UNESCAPED_UNICODE));
         return ['ok' => true, 'results' => $results];
+    }
+
+    /**
+     * [新增] 强制重置系统状态（终止进程并清理锁）
+     * 适用于任务卡死崩溃时进行急救。
+     */
+    public static function forceReset(): array
+    {
+        $messages = [];
+
+        // 1. 强制杀死后台进程 (基于特征匹配)
+        // 注意：基于您架构中的拉起方式，进程名为 crawl.php
+        $script = 'bin/crawl.php';
+        exec(sprintf('pkill -9 -f %s 2>&1', escapeshellarg($script)), $out, $exit);
+        if ($exit === 0) {
+            $messages[] = '已向卡死的后台采集进程发送终止信号';
+        }
+
+        // 2. 物理抹除数据库中的僵尸运行记录（消除 MAX(started_at) 对下次触发的影响）
+        try {
+            $stmt = Db::crawler()->query("DELETE FROM cj_crawl_runs WHERE status = 'running'");
+            $deleted = $stmt->rowCount();
+            $messages[] = "已从数据库彻底清理 {$deleted} 条 running 记录，不计入最后采集时间";
+        } catch (\Throwable $e) {
+            $messages[] = '数据库清理异常: ' . $e->getMessage();
+        }
+
+        // 3. 删除文件锁
+        $lockFile = self::lockFile();
+        if (is_file($lockFile)) {
+            @unlink($lockFile);
+            $messages[] = '已释放时间锁定限制';
+        }
+
+        Logger::info('crawl', '执行了强制急救重置：' . implode('；', $messages));
+        return ['ok' => true, 'message' => implode('；', $messages)];
     }
 }
