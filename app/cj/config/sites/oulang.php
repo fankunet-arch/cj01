@@ -1,42 +1,39 @@
 <?php
 /**
- * 欧浪网 采集配置（已按真实页面结构回填，P0 勘察完成）。
- * 站点：https://infohuaxin.com  招聘求职频道 class1=13
- * 编码：gb2312（Fetcher 按 GBK 解码转 UTF-8）；静态 HTML，无需 JS 渲染。
+ * 欧浪网 采集配置（新平台 eulam，列表页内联解析，P0 勘察完成）。
+ * 站点：https://eulam.infohuaxin.com  招聘求职频道 /category/jobs
+ * 编码：UTF-8；nginx，非 Cloudflare，服务器端可正常抓取。
  *
- * 列表页每条 .inflist5_list 里，真正的详情链接是“查看”那个 <a class="inf_a">
- * （标题链接是 href="###" 的 JS 展开，不可用）。详情页 showinfo.asp?id=XXX。
+ * 该平台列表页每条 .category-listing-item 已内联全部字段（标题/城市/日期/正文/
+ * 联系人/电话/详情链接），采用 list_inline 模式：只抓列表页、逐条入库，
+ * 无需再抓详情页（请求更少、更礼貌，一页约 20 条）。
  * 站点改版时只改本文件，不动核心代码。
+ *
+ * 备注：传统站 infohuaxin.com 挂 Cloudflare，服务器端 403 抓不了，故改用本新平台。
  */
 
 return [
-    'site'          => 'oulang',
-    'enabled'       => true,
-    'list_url'      => 'https://infohuaxin.com/showclass.asp?class1=13&page=%d',
-    'list_selector' => '.inflist5_list a.inf_a',   // “查看”→ showinfo.asp?id=XXX
-    'detail'        => [
-        'title'        => 'title',              // 详情页 <title> = 岗位标题（干净）
-        'company'      => null,                 // 该站无独立店名字段
-        'salary'       => null,                 // 无独立薪资字段（并入正文）
-        'desc'         => '.inftext_box p',      // 正文段落
-        'phone'        => '.inftel',             // 电话，形如 0034-611048491
-        'wechat'       => null,                  // 无独立微信字段（常写在正文）
-        'contact_name' => '.inftextline p',      // 第一个 .inftextline 的 <p> = 联系人
-        'city'         => '.inftext_address',     // “地区：VALENCIA”（含前缀，后续可清洗）
+    'site'               => 'oulang',
+    'enabled'            => true,
+    'mode'               => 'list_inline',
+    'list_url'           => 'https://eulam.infohuaxin.com/category/jobs?page=%d',
+    'list_item_selector' => '.category-listing-item',           // 每条招聘卡片容器
+    'link_selector'      => '.category-detail-link',            // → /info/XXXXX（source_url 唯一键）
+    'detail'             => [
+        'title'        => '.category-compact-title',            // 岗位标题
+        'company'      => null,
+        'salary'       => null,
+        'desc'         => '.category-detail-desc',              // 正文
+        'phone'        => '.category-detail-contact a',         // 联络电话（tel 链接文本，无则空）
+        'wechat'       => null,                                 // 微信常写在正文，无独立字段
+        'contact_name' => '.category-detail-contact',           // “联络人：X · …”，解析器自动清洗
+        'city'         => '.category-compact-city',             // 城市（MADRID 等）
         'district'     => null,
-        'date'         => null,                  // 详情页只有“今天/到期时间”，易误取到期日，暂不采
+        'date'         => '.category-detail-meta',              // “发布 2026-07-27 · 地区 …”
     ],
-    'category'      => '招聘求职',
-    'contact_mode'  => 'plain',                 // 联系方式明文
-    'rate_limit'    => ['min_delay' => 8, 'max_delay' => 20],   // 秒（§6.1，礼貌采集）
-    'render'        => 'php',
-    'charset'       => 'GBK',                   // gb2312 的超集，兼容页面里的扩展字
-    // 反爬应对：先访问首页拿 cookie，再抓列表（对 cookie 门有效）；
-    // 若仍 403 且响应头含 cloudflare，则该站需 headless 浏览器通道（见下方说明）。
-    'warmup_url'    => 'https://infohuaxin.com/',
-    'http'          => [
-        // 需要时可覆盖 UA 或加自定义头，例如：
-        // 'user_agent' => 'Mozilla/5.0 ...',
-        // 'headers' => ['Referer: https://infohuaxin.com/showclass.asp?class1=13'],
-    ],
+    'category'           => '招聘求职',
+    'contact_mode'       => 'plain',
+    'rate_limit'         => ['min_delay' => 8, 'max_delay' => 20],   // 秒（§6.1，礼貌采集）
+    'render'             => 'php',
+    'charset'            => null,                               // UTF-8，无需转码
 ];

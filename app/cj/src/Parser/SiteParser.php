@@ -42,24 +42,73 @@ final class SiteParser
     /** 详情页 → 统一数据模型原始字段（归一化在 Normalizer 层做）。 */
     public function parseDetailPage(string $html): array
     {
+        return $this->extractFields($this->xpath($html), null);
+    }
+
+    /**
+     * 列表页内联解析（mode=list_inline）：每个 item 容器 → 一条统一模型记录（含 source_url）。
+     * 适用于列表页已内联全部字段的站点，无需再抓详情页（请求更少、更礼貌）。
+     */
+    public function parseListItems(string $html, string $pageUrl): array
+    {
         $xpath = $this->xpath($html);
+        $itemQuery = CssSelector::toXPath($this->config['list_item_selector'] ?? $this->config['list_selector']);
+        $linkSel = $this->config['link_selector'] ?? null;
+
+        $out = [];
+        $seen = [];
+        foreach ($xpath->query($itemQuery) ?: [] as $node) {
+            $rec = $this->extractFields($xpath, $node);
+
+            $url = null;
+            if ($linkSel !== null) {
+                $a = $xpath->query('.' . CssSelector::toXPath($linkSel), $node);
+                if ($a !== false && $a->length > 0) {
+                    $url = $this->absoluteUrl($a->item(0)->getAttribute('href'), $pageUrl);
+                }
+            }
+            if ($url === null || $rec['title'] === null || isset($seen[$url])) {
+                continue;
+            }
+            $seen[$url] = true;
+            $rec['source_url'] = $url;
+            $out[] = $rec;
+        }
+        return $out;
+    }
+
+    /** 从上下文节点（null=整篇文档）按 detail 选择器抽取统一字段。 */
+    private function extractFields(DOMXPath $xpath, ?\DOMNode $ctx): array
+    {
         $sel = $this->config['detail'];
         $loginWall = ($this->config['contact_mode'] ?? 'plain') === 'login_wall';
 
         return [
-            'title'          => $this->text($xpath, $sel['title'] ?? null),
-            'company'        => $this->text($xpath, $sel['company'] ?? null),
-            'salary_raw'     => $this->text($xpath, $sel['salary'] ?? null),
-            'description'    => $this->text($xpath, $sel['desc'] ?? null),
+            'title'          => $this->textIn($xpath, $ctx, $sel['title'] ?? null),
+            'company'        => $this->textIn($xpath, $ctx, $sel['company'] ?? null),
+            'salary_raw'     => $this->textIn($xpath, $ctx, $sel['salary'] ?? null),
+            'description'    => $this->textIn($xpath, $ctx, $sel['desc'] ?? null),
             // 登录墙内容不采集也不绕过，联系方式置空（文档 §2.2 降级策略）
-            'contact_phone'  => $loginWall ? null : $this->text($xpath, $sel['phone'] ?? null),
-            'contact_wechat' => $loginWall ? null : $this->text($xpath, $sel['wechat'] ?? null),
-            'contact_name'   => $this->text($xpath, $sel['contact_name'] ?? null),
-            'city'           => $this->text($xpath, $sel['city'] ?? null),
-            'district'       => $this->text($xpath, $sel['district'] ?? null),
-            'publish_date'   => $this->date($this->text($xpath, $sel['date'] ?? null)),
+            'contact_phone'  => $loginWall ? null : $this->textIn($xpath, $ctx, $sel['phone'] ?? null),
+            'contact_wechat' => $loginWall ? null : $this->textIn($xpath, $ctx, $sel['wechat'] ?? null),
+            'contact_name'   => $this->cleanContactName($this->textIn($xpath, $ctx, $sel['contact_name'] ?? null)),
+            'city'           => $this->textIn($xpath, $ctx, $sel['city'] ?? null),
+            'district'       => $this->textIn($xpath, $ctx, $sel['district'] ?? null),
+            'publish_date'   => $this->date($this->textIn($xpath, $ctx, $sel['date'] ?? null)),
             'category'       => $this->config['category'] ?? null,
         ];
+    }
+
+    /** 去掉“联络人：/联系人：”标签前缀，截断到 · 或 联络电话 之前。 */
+    private function cleanContactName(?string $s): ?string
+    {
+        if ($s === null) {
+            return null;
+        }
+        $s = preg_replace('/^.*?(?:联络人|联系人)\s*[:：]\s*/u', '', $s) ?? $s;
+        $s = preg_split('/\s*[·|]\s*|联络电话|联系电话/u', $s)[0] ?? $s;
+        $s = trim($s);
+        return $s !== '' ? $s : null;
     }
 
     private function xpath(string $html): DOMXPath
@@ -76,12 +125,14 @@ final class SiteParser
         return new DOMXPath($doc);
     }
 
-    private function text(DOMXPath $xpath, ?string $css): ?string
+    /** 取选择器命中的首个节点文本；$ctx 非空时在该节点内相对查找（.//）。 */
+    private function textIn(DOMXPath $xpath, ?\DOMNode $ctx, ?string $css): ?string
     {
         if ($css === null || $css === '') {
             return null;
         }
-        $nodes = $xpath->query(CssSelector::toXPath($css));
+        $q = CssSelector::toXPath($css);
+        $nodes = $ctx !== null ? $xpath->query('.' . $q, $ctx) : $xpath->query($q);
         if ($nodes === false || $nodes->length === 0) {
             return null;
         }

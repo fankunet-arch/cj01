@@ -68,6 +68,30 @@ final class CrawlRunner
                     break;
                 }
 
+                // 列表内联模式：一页即含全部字段，无需抓详情
+                if (($this->site['mode'] ?? 'list_detail') === 'list_inline') {
+                    $records = $this->parser->parseListItems($res['body'], $listUrl);
+                    if ($records === []) {
+                        Logger::info('crawl', "[$siteId] p{$page} 列表页解析到 0 条，停止翻页");
+                        break;
+                    }
+                    foreach ($records as $rec) {
+                        if ($this->dedup->isKnownUrl($rec['source_url'])) {
+                            $dup++;
+                            $consecutiveKnown++;
+                            if ($consecutiveKnown >= $stopAfterKnown) {
+                                Logger::info('crawl', "[$siteId] 连续 {$consecutiveKnown} 条已存在，增量采集停止（§6.4）");
+                                break 2;
+                            }
+                            continue;
+                        }
+                        $consecutiveKnown = 0;
+                        $result = $this->processRecord($rec, $rec['source_url']);
+                        $result === 'new' ? $new++ : $dup++;
+                    }
+                    continue;
+                }
+
                 $detailUrls = $this->parser->parseListPage($res['body'], $listUrl);
                 if ($detailUrls === []) {
                     Logger::info('crawl', "[$siteId] p{$page} 列表页无链接，停止翻页（可能到底或选择器失效）");
@@ -162,6 +186,43 @@ final class CrawlRunner
                         . ($sv !== null ? "；响应头 {$sv}" : '') . '）';
                     break;
                 }
+                // 列表内联模式：一页即含全部字段，无需抓详情
+                $inline = ($this->site['mode'] ?? 'list_detail') === 'list_inline';
+                if ($inline) {
+                    $records = $this->parser->parseListItems($res['body'], $listUrl);
+                    if ($page === 1) {
+                        $r['links'] = count($records);
+                    }
+                    if ($records === []) {
+                        $r['note'] = '列表页解析到 0 条（选择器不匹配或已到末页）';
+                        break;
+                    }
+                    foreach ($records as $rec) {
+                        if (microtime(true) >= $deadline) {
+                            $r['note'] = '已达时间上限，未采完（可再次点击继续）';
+                            break 2;
+                        }
+                        if ($r['new'] >= $maxItems) {
+                            $r['note'] = "已达本次上限 {$maxItems} 条（可再次点击继续采下一批）";
+                            break 2;
+                        }
+                        if ($this->dedup->isKnownUrl($rec['source_url'])) {
+                            $r['dup']++;
+                            continue;
+                        }
+                        $result = $this->processRecord($rec, $rec['source_url']);
+                        if ($result === 'new') {
+                            $r['new']++;
+                            if (count($r['samples']) < 5 && $this->lastTitle !== null) {
+                                $r['samples'][] = $this->lastTitle;
+                            }
+                        } else {
+                            $r['dup']++;
+                        }
+                    }
+                    continue;
+                }
+
                 $urls = $this->parser->parseListPage($res['body'], $listUrl);
                 if ($page === 1) {
                     $r['links'] = count($urls);
@@ -219,6 +280,16 @@ final class CrawlRunner
         $this->repo->saveRawPage($siteId, $url, $res['body'], $res['status']);
 
         $raw = $this->parser->parseDetailPage($res['body']);
+        return $this->processRecord($raw, $url);
+    }
+
+    /**
+     * 归一化 → 三级去重 → 入库，返回 'new' | 'dup'。
+     * 详情页模式与列表内联模式共用（$raw 为统一模型原始字段，$url 为 source_url）。
+     */
+    private function processRecord(array $raw, string $url): string
+    {
+        $siteId = $this->site['site'];
         $this->lastTitleEmpty = ($raw['title'] === null);
         $this->lastTitle = $raw['title'];
 
@@ -238,6 +309,8 @@ final class CrawlRunner
         ]);
 
         $purgeDays = (int) (cj_config('crawl')['purge_after_days'] ?? 90);
+        // source_url 可能已在 $raw（列表内联），显式覆盖确保一致
+        unset($raw['source_url']);
         $jobId = $this->repo->insertCleanJob($raw + [
             'source_site'  => $siteId,
             'source_url'   => $url,
