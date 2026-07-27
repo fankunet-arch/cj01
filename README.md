@@ -109,8 +109,8 @@ server {
     root /srv/zhaopin/zp_html;
     index index.php;
 
-    # 采集器：只放行三个入口，其余 /cj/ 下的 .php 一律拒绝
-    location ~ ^/cj/(index|review|dashboard)\.php$ {
+    # 采集器：只放行内部入口，其余 /cj/ 下的 .php 一律拒绝
+    location ~ ^/cj/(index|review|dashboard|sources)\.php$ {
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;

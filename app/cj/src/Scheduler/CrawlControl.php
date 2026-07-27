@@ -17,22 +17,67 @@ use Cj\Support\Logger;
  */
 final class CrawlControl
 {
-    /** 硬下限：采集间隔不能小于 1 小时 */
+    /** 生产硬下限：采集间隔不能小于 1 小时 */
     private const MIN_INTERVAL = 3600;
+
+    /** 调试模式下的安全下限：仍不允许无限连点（防误触打爆目标站） */
+    private const DEBUG_MIN_INTERVAL = 10;
 
     public static function minInterval(): int
     {
-        $configured = (int) (cj_config('crawl')['min_trigger_interval'] ?? self::MIN_INTERVAL);
+        $crawl = cj_config('crawl') ?? [];
+        // 调试模式（配置强制开 或 网页开关开）：采集间隔缩短，便于反复调试。
+        if (self::debugEnabled()) {
+            $dbg = (int) ($crawl['debug_interval'] ?? 60);   // 默认 60 秒
+            return max(self::DEBUG_MIN_INTERVAL, $dbg);
+        }
+        $configured = (int) ($crawl['min_trigger_interval'] ?? self::MIN_INTERVAL);
         return max(self::MIN_INTERVAL, $configured);
     }
 
-    private static function lockFile(): string
+    private static function stateDir(): string
     {
         $dir = cj_config('log_dir') ?: CJ_APP_ROOT . '/logs';
         if (!is_dir($dir)) {
             @mkdir($dir, 0750, true);
         }
-        return $dir . '/crawl_trigger.lock';
+        return $dir;
+    }
+
+    private static function lockFile(): string
+    {
+        return self::stateDir() . '/crawl_trigger.lock';
+    }
+
+    private static function debugFlagFile(): string
+    {
+        return self::stateDir() . '/debug.enabled';
+    }
+
+    /** 调试模式是否开启：配置 crawl.debug 强制开，或网页开关（标记文件）开。 */
+    public static function debugEnabled(): bool
+    {
+        if (!empty(cj_config('crawl')['debug'])) {
+            return true;
+        }
+        return is_file(self::debugFlagFile());
+    }
+
+    /** 配置是否强制开启调试（此时网页开关无法关闭）。 */
+    public static function debugForcedByConfig(): bool
+    {
+        return !empty(cj_config('crawl')['debug']);
+    }
+
+    /** 网页开关：开/关调试模式（写/删标记文件）。 */
+    public static function setDebug(bool $on): void
+    {
+        $file = self::debugFlagFile();
+        if ($on) {
+            @file_put_contents($file, (string) time());
+        } else {
+            @unlink($file);
+        }
     }
 
     /** 上次触发时间戳（文件锁记录与 cj_crawl_runs 取较新者）。 */
@@ -61,13 +106,31 @@ final class CrawlControl
         return $fromDb === null ? $fromFile : max($fromFile, $fromDb);
     }
 
-    /** 是否有采集任务正在运行（6 小时前的 running 视为僵尸记录，不阻塞）。 */
+    /**
+     * 回收僵尸 running 记录：请求被超时/致命杀掉时会留下永远 running 的记录，
+     * 超过 3 分钟的 running 一律标记失败（同步采集通常 ≤20 秒，绝无正常 3 分钟仍 running）。
+     */
+    public static function reapStaleRuns(): void
+    {
+        try {
+            Db::crawler()->exec(
+                "UPDATE cj_crawl_runs
+                 SET status = 'failed', finished_at = NOW(),
+                     note = CONCAT(COALESCE(note, ''), ' [自动回收：疑似超时/中断]')
+                 WHERE status = 'running' AND started_at < NOW() - INTERVAL 3 MINUTE"
+            );
+        } catch (\Throwable) {
+        }
+    }
+
+    /** 是否有采集任务正在运行（先回收僵尸记录，仅近 3 分钟的 running 才算“运行中”）。 */
     public static function isRunning(): bool
     {
+        self::reapStaleRuns();
         try {
             return (bool) Db::crawler()->query(
                 "SELECT 1 FROM cj_crawl_runs
-                 WHERE status = 'running' AND started_at > NOW() - INTERVAL 6 HOUR
+                 WHERE status = 'running' AND started_at > NOW() - INTERVAL 3 MINUTE
                  LIMIT 1"
             )->fetchColumn();
         } catch (\Throwable) {
@@ -83,11 +146,15 @@ final class CrawlControl
         $running = self::isRunning();
         $canTrigger = !$running && ($nextAllowed === null || time() >= $nextAllowed);
 
+        $debug = self::debugEnabled();
+        $interval = self::minInterval();
         $reason = null;
         if ($running) {
             $reason = '已有采集任务正在运行';
         } elseif (!$canTrigger && $nextAllowed !== null) {
-            $reason = sprintf('采集间隔不能小于 1 小时，%s 后可再次触发', date('Y-m-d H:i', $nextAllowed));
+            $reason = $debug
+                ? sprintf('调试模式：间隔 %d 秒，%s 后可再次触发', $interval, date('H:i:s', $nextAllowed))
+                : sprintf('采集间隔不能小于 1 小时，%s 后可再次触发', date('Y-m-d H:i', $nextAllowed));
         }
 
         return [
@@ -96,6 +163,9 @@ final class CrawlControl
             'next_allowed_at' => $nextAllowed !== null ? date('Y-m-d H:i:s', $nextAllowed) : null,
             'can_trigger'     => $canTrigger,
             'reason'          => $reason,
+            'debug'           => $debug,
+            'debug_forced'    => self::debugForcedByConfig(),
+            'interval'        => $interval,
         ];
     }
 
@@ -168,5 +238,31 @@ final class CrawlControl
 
         Logger::info('crawl', '一键采集已触发（Web），后台执行 crawl.php --all');
         return ['ok' => true, 'message' => '一键采集已启动，进度见运行看板（本次采集完成后 1 小时内不可再次触发）'];
+    }
+
+    /**
+     * 同步采集（虚拟主机 / 无 cron / 无 exec 时用）：在当前请求内直接跑一小批，
+     * 立即返回每个启用站点的诊断结果（不依赖 exec、不后台）。
+     */
+    public static function triggerSync(int $maxItems = 10): array
+    {
+        $acquired = self::acquire();
+        if (!$acquired['ok']) {
+            return ['ok' => false, 'message' => $acquired['message']];
+        }
+
+        $results = [];
+        foreach (glob(CJ_APP_ROOT . '/config/sites/*.php') ?: [] as $file) {
+            $sc = require $file;
+            if (empty($sc['enabled'])) {
+                continue;
+            }
+            $results[] = (new CrawlRunner($sc))->runSync($maxItems);
+        }
+        if ($results === []) {
+            return ['ok' => false, 'message' => '没有已启用的采集源（config/sites/*.php 中 enabled=true）'];
+        }
+        Logger::info('crawl', '同步采集完成（Web）：' . json_encode($results, JSON_UNESCAPED_UNICODE));
+        return ['ok' => true, 'results' => $results];
     }
 }

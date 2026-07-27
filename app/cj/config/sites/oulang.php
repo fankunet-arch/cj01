@@ -1,28 +1,39 @@
 <?php
 /**
- * 欧浪网 采集配置（占位框架）。
- * P0 站点勘察后按真实页面结构回填选择器（文档 §2.2、§4.3、§9）。
+ * 欧浪网 采集配置（新平台 eulam，列表页内联解析，P0 勘察完成）。
+ * 站点：https://eulam.infohuaxin.com  招聘求职频道 /category/jobs
+ * 编码：UTF-8；nginx，非 Cloudflare，服务器端可正常抓取。
+ *
+ * 该平台列表页每条 .category-listing-item 已内联全部字段（标题/城市/日期/正文/
+ * 联系人/电话/详情链接），采用 list_inline 模式：只抓列表页、逐条入库，
+ * 无需再抓详情页（请求更少、更礼貌，一页约 20 条）。
  * 站点改版时只改本文件，不动核心代码。
+ *
+ * 备注：传统站 infohuaxin.com 挂 Cloudflare，服务器端 403 抓不了，故改用本新平台。
  */
 
 return [
-    'site'          => 'oulang',
-    'enabled'       => false,   // P0 勘察回填选择器后再开启
-    'list_url'      => 'https://infohuaxin.com/showclass.asp?class1=13&page=%d',
-    'list_selector' => '.job-item a.title',   // 列表页 → 详情链接（待确认）
-    'detail'        => [
-        'title'   => '.job-title',
-        'company' => '.company',
-        'salary'  => '.salary',
-        'desc'    => '.job-desc',
-        'phone'   => '.contact-phone',   // 明文时
-        'wechat'  => '.contact-wechat',
-        'city'    => '.location',
-        'date'    => '.publish-date',
+    'site'               => 'oulang',
+    'enabled'            => true,
+    'mode'               => 'list_inline',
+    'list_url'           => 'https://eulam.infohuaxin.com/category/jobs?page=%d',
+    'list_item_selector' => '.category-listing-item',           // 每条招聘卡片容器
+    'link_selector'      => '.category-detail-link',            // → /info/XXXXX（source_url 唯一键）
+    'detail'             => [
+        'title'        => '.category-compact-title',            // 岗位标题
+        'company'      => null,
+        'salary'       => null,
+        'desc'         => '.category-detail-desc',              // 正文
+        'phone'        => '.category-detail-contact a',         // 联络电话（tel 链接文本，无则空）
+        'wechat'       => null,                                 // 微信常写在正文，无独立字段
+        'contact_name' => '.category-detail-contact',           // “联络人：X · …”，解析器自动清洗
+        'city'         => '.category-compact-city',             // 城市（MADRID 等）
+        'district'     => null,
+        'date'         => '.category-detail-meta',              // “发布 2026-07-27 · 地区 …”
     ],
-    'category'      => '待分类',
-    'contact_mode'  => 'plain',            // plain | click | login_wall
-    'rate_limit'    => ['min_delay' => 8, 'max_delay' => 20],   // 秒（§6.1）
-    'render'        => 'php',              // php | headless（§4.1 JS 渲染例外）
-    'charset'       => null,               // 页面编码非 UTF-8 时指定，如 'gbk'
+    'category'           => '招聘求职',
+    'contact_mode'       => 'plain',
+    'rate_limit'         => ['min_delay' => 8, 'max_delay' => 20],   // 秒（§6.1，礼貌采集）
+    'render'             => 'php',
+    'charset'            => null,                               // UTF-8，无需转码
 ];

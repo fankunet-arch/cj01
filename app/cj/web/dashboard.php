@@ -13,7 +13,7 @@ $renderBody = function () use ($runs) {
     <div class="card">
         <h2>最近 <?= count($runs) ?> 次采集任务</h2>
         <?php if ($runs === []): ?>
-            <p class="muted">暂无采集记录。cron 触发 <code>app/cj/bin/crawl.php</code> 后此处显示运行情况。</p>
+            <p class="muted">暂无采集记录。在<a href="<?= cj_e(cj_url('index.php')) ?>">概览页</a>点「同步采集一批」（虚拟主机适用），或 cron 触发 <code>app/cj/bin/crawl.php</code> 后，此处显示运行情况。</p>
         <?php else: ?>
             <table>
                 <tr>

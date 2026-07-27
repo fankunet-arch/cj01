@@ -25,13 +25,14 @@ final class CrawlRunner
     private Fetcher $fetcher;
     private SiteParser $parser;
     private bool $lastTitleEmpty = false;
+    private ?string $lastTitle = null;
 
     public function __construct(array $siteConfig)
     {
         $this->site = $siteConfig;
         $this->repo = new CrawlerRepository();
         $this->dedup = new DedupEngine($this->repo);
-        $this->fetcher = new Fetcher($siteConfig['site'], $siteConfig['rate_limit'] ?? []);
+        $this->fetcher = new Fetcher($siteConfig['site'], $siteConfig['rate_limit'] ?? [], $siteConfig['http'] ?? []);
         $this->parser = new SiteParser($siteConfig);
     }
 
@@ -65,6 +66,30 @@ final class CrawlRunner
                     $errors++;
                     Logger::error('crawl', "[$siteId] 列表页抓取失败 p{$page} status={$res['status']}");
                     break;
+                }
+
+                // 列表内联模式：一页即含全部字段，无需抓详情
+                if (($this->site['mode'] ?? 'list_detail') === 'list_inline') {
+                    $records = $this->parser->parseListItems($res['body'], $listUrl);
+                    if ($records === []) {
+                        Logger::info('crawl', "[$siteId] p{$page} 列表页解析到 0 条，停止翻页");
+                        break;
+                    }
+                    foreach ($records as $rec) {
+                        if ($this->dedup->isKnownUrl($rec['source_url'])) {
+                            $dup++;
+                            $consecutiveKnown++;
+                            if ($consecutiveKnown >= $stopAfterKnown) {
+                                Logger::info('crawl', "[$siteId] 连续 {$consecutiveKnown} 条已存在，增量采集停止（§6.4）");
+                                break 2;
+                            }
+                            continue;
+                        }
+                        $consecutiveKnown = 0;
+                        $result = $this->processRecord($rec, $rec['source_url']);
+                        $result === 'new' ? $new++ : $dup++;
+                    }
+                    continue;
                 }
 
                 $detailUrls = $this->parser->parseListPage($res['body'], $listUrl);
@@ -119,6 +144,154 @@ final class CrawlRunner
         }
     }
 
+    /**
+     * 同步采集（虚拟主机 / 无 cron 用）：在当前请求内直接跑一小批，返回诊断结果。
+     * 不依赖 exec/后台进程；有条数上限与时间预算，避免 Web 请求超时。
+     */
+    public function runSync(int $maxItems = 10, int $maxSeconds = 18): array
+    {
+        $siteId = $this->site['site'];
+        $r = ['site' => $siteId, 'pages' => 0, 'links' => 0, 'new' => 0, 'dup' => 0,
+              'errors' => 0, 'list_status' => null, 'note' => null, 'error' => null, 'samples' => []];
+
+        if (($this->site['render'] ?? 'php') !== 'php') {
+            $r['error'] = '该站为 headless(JS) 渲染，PHP 端不支持';
+            return $r;
+        }
+
+        // 同步模式：短间隔 + 短抓取超时，尽量在虚拟主机的 Web/FastCGI 超时前跑完
+        $this->fetcher = new Fetcher($siteId . '-sync', ['min_delay' => 1, 'max_delay' => 2],
+            ['timeout' => 20] + ($this->site['http'] ?? []));
+        @set_time_limit($maxSeconds + 15);
+        $deadline = microtime(true) + $maxSeconds;
+
+        // 预热：先访问站点首页以获取 cookie 并形成合理 Referer（对 cookie 门/反爬有用）
+        if (!empty($this->site['warmup_url'])) {
+            $this->fetcher->get((string) $this->site['warmup_url'], $this->site['charset'] ?? null);
+        }
+
+        $runId = $this->repo->startRun($siteId);
+
+        // 关闭钩子：请求被服务器超时/致命杀掉时，也把运行记录标记为失败并记下卡住的阶段，
+        // 避免看板永远停在 running，同时给出诊断线索。
+        $stage = '启动';
+        $finished = false;
+        $repo = $this->repo;
+        register_shutdown_function(function () use (&$finished, &$stage, &$r, $runId, $repo): void {
+            if ($finished) {
+                return;
+            }
+            try {
+                $repo->finishRun($runId, 'failed', $r['pages'], $r['new'], $r['dup'], $r['errors'],
+                    '请求异常终止（疑似 Web/FastCGI 超时或致命错误），最后阶段：' . $stage);
+            } catch (\Throwable) {
+            }
+        });
+
+        try {
+            $maxPages = (int) (cj_config('crawl')['max_pages_per_run'] ?? 10);
+            for ($page = 1; $page <= $maxPages; $page++) {
+                if (microtime(true) >= $deadline) {   // 翻页前先看时间预算
+                    $r['note'] = '已达时间上限，未采完（可再次点击继续）';
+                    break;
+                }
+                $stage = "抓取列表页 p{$page}";
+                $listUrl = sprintf($this->site['list_url'], $page);
+                $res = $this->fetcher->get($listUrl, $this->site['charset'] ?? null);
+                $r['pages']++;
+                if ($page === 1) {
+                    $r['list_status'] = $res['status'];
+                }
+                if ($res['status'] !== 200 || $res['body'] === null) {
+                    $r['errors']++;
+                    $sv = $this->fetcher->serverHeader();
+                    $r['note'] = "列表页抓取失败 HTTP {$res['status']}（服务器无法访问该站/被反爬拦截"
+                        . ($sv !== null ? "；响应头 {$sv}" : '') . '）';
+                    break;
+                }
+                // 列表内联模式：一页即含全部字段，无需抓详情
+                $inline = ($this->site['mode'] ?? 'list_detail') === 'list_inline';
+                if ($inline) {
+                    $records = $this->parser->parseListItems($res['body'], $listUrl);
+                    if ($page === 1) {
+                        $r['links'] = count($records);
+                    }
+                    if ($records === []) {
+                        $r['note'] = '列表页解析到 0 条（选择器不匹配或已到末页）';
+                        break;
+                    }
+                    foreach ($records as $rec) {
+                        if (microtime(true) >= $deadline) {
+                            $r['note'] = '已达时间上限，未采完（可再次点击继续）';
+                            break 2;
+                        }
+                        if ($r['new'] >= $maxItems) {
+                            $r['note'] = "已达本次上限 {$maxItems} 条（可再次点击继续采下一批）";
+                            break 2;
+                        }
+                        if ($this->dedup->isKnownUrl($rec['source_url'])) {
+                            $r['dup']++;
+                            continue;
+                        }
+                        $stage = "入库第 " . ($r['new'] + 1) . " 条（p{$page}）";
+                        $result = $this->processRecord($rec, $rec['source_url']);
+                        if ($result === 'new') {
+                            $r['new']++;
+                            if (count($r['samples']) < 5 && $this->lastTitle !== null) {
+                                $r['samples'][] = $this->lastTitle;
+                            }
+                        } else {
+                            $r['dup']++;
+                        }
+                    }
+                    continue;
+                }
+
+                $urls = $this->parser->parseListPage($res['body'], $listUrl);
+                if ($page === 1) {
+                    $r['links'] = count($urls);
+                }
+                if ($urls === []) {
+                    $r['note'] = '列表页解析到 0 个详情链接（选择器不匹配或已到末页）';
+                    break;
+                }
+                foreach ($urls as $url) {
+                    if (microtime(true) >= $deadline) {
+                        $r['note'] = '已达时间上限，未采完（可再次点击继续）';
+                        break 2;
+                    }
+                    if ($r['new'] >= $maxItems) {
+                        $r['note'] = "已达本次上限 {$maxItems} 条（可再次点击继续采下一批）";
+                        break 2;
+                    }
+                    if ($this->dedup->isKnownUrl($url)) {
+                        $r['dup']++;
+                        continue;
+                    }
+                    $result = $this->crawlDetail($url);
+                    if ($result === 'new') {
+                        $r['new']++;
+                        if (count($r['samples']) < 5 && $this->lastTitle !== null) {
+                            $r['samples'][] = $this->lastTitle;
+                        }
+                    } elseif ($result === 'dup') {
+                        $r['dup']++;
+                    } else {
+                        $r['errors']++;
+                    }
+                }
+            }
+            $status = ($r['errors'] > 0 && $r['new'] === 0) ? 'failed' : 'ok';
+            $this->repo->finishRun($runId, $status, $r['pages'], $r['new'], $r['dup'], $r['errors'], $r['note']);
+            $finished = true;
+        } catch (\Throwable $e) {
+            $r['error'] = $e->getMessage();
+            $this->repo->finishRun($runId, 'failed', $r['pages'], $r['new'], $r['dup'], $r['errors'] + 1, mb_substr($e->getMessage(), 0, 480));
+            $finished = true;
+        }
+        return $r;
+    }
+
     /** 抓取并处理单个详情页，返回 'new' | 'dup' | 'error'。 */
     private function crawlDetail(string $url): string
     {
@@ -133,7 +306,18 @@ final class CrawlRunner
         $this->repo->saveRawPage($siteId, $url, $res['body'], $res['status']);
 
         $raw = $this->parser->parseDetailPage($res['body']);
+        return $this->processRecord($raw, $url);
+    }
+
+    /**
+     * 归一化 → 三级去重 → 入库，返回 'new' | 'dup'。
+     * 详情页模式与列表内联模式共用（$raw 为统一模型原始字段，$url 为 source_url）。
+     */
+    private function processRecord(array $raw, string $url): string
+    {
+        $siteId = $this->site['site'];
         $this->lastTitleEmpty = ($raw['title'] === null);
+        $this->lastTitle = $raw['title'];
 
         // 归一化（§3.3）
         $phoneNorm = ContactNormalizer::phone($raw['contact_phone']);
@@ -151,6 +335,8 @@ final class CrawlRunner
         ]);
 
         $purgeDays = (int) (cj_config('crawl')['purge_after_days'] ?? 90);
+        // source_url 可能已在 $raw（列表内联），显式覆盖确保一致
+        unset($raw['source_url']);
         $jobId = $this->repo->insertCleanJob($raw + [
             'source_site'  => $siteId,
             'source_url'   => $url,
