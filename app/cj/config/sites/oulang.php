@@ -31,4 +31,12 @@ return [
     'rate_limit'    => ['min_delay' => 8, 'max_delay' => 20],   // 秒（§6.1，礼貌采集）
     'render'        => 'php',
     'charset'       => 'GBK',                   // gb2312 的超集，兼容页面里的扩展字
+    // 反爬应对：先访问首页拿 cookie，再抓列表（对 cookie 门有效）；
+    // 若仍 403 且响应头含 cloudflare，则该站需 headless 浏览器通道（见下方说明）。
+    'warmup_url'    => 'https://infohuaxin.com/',
+    'http'          => [
+        // 需要时可覆盖 UA 或加自定义头，例如：
+        // 'user_agent' => 'Mozilla/5.0 ...',
+        // 'headers' => ['Referer: https://infohuaxin.com/showclass.asp?class1=13'],
+    ],
 ];

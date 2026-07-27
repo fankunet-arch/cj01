@@ -32,7 +32,7 @@ final class CrawlRunner
         $this->site = $siteConfig;
         $this->repo = new CrawlerRepository();
         $this->dedup = new DedupEngine($this->repo);
-        $this->fetcher = new Fetcher($siteConfig['site'], $siteConfig['rate_limit'] ?? []);
+        $this->fetcher = new Fetcher($siteConfig['site'], $siteConfig['rate_limit'] ?? [], $siteConfig['http'] ?? []);
         $this->parser = new SiteParser($siteConfig);
     }
 
@@ -136,9 +136,14 @@ final class CrawlRunner
         }
 
         // 同步模式用短间隔，避免请求超时（生产大批量仍走 CLI/cron 的礼貌间隔）
-        $this->fetcher = new Fetcher($siteId . '-sync', ['min_delay' => 1, 'max_delay' => 2]);
+        $this->fetcher = new Fetcher($siteId . '-sync', ['min_delay' => 1, 'max_delay' => 2], $this->site['http'] ?? []);
         @set_time_limit($maxSeconds + 20);
         $deadline = microtime(true) + $maxSeconds;
+
+        // 预热：先访问站点首页以获取 cookie 并形成合理 Referer（对 cookie 门/反爬有用）
+        if (!empty($this->site['warmup_url'])) {
+            $this->fetcher->get((string) $this->site['warmup_url'], $this->site['charset'] ?? null);
+        }
 
         $runId = $this->repo->startRun($siteId);
         try {
@@ -152,7 +157,9 @@ final class CrawlRunner
                 }
                 if ($res['status'] !== 200 || $res['body'] === null) {
                     $r['errors']++;
-                    $r['note'] = "列表页抓取失败 HTTP {$res['status']}（服务器无法访问该站/被拦）";
+                    $sv = $this->fetcher->serverHeader();
+                    $r['note'] = "列表页抓取失败 HTTP {$res['status']}（服务器无法访问该站/被反爬拦截"
+                        . ($sv !== null ? "；响应头 {$sv}" : '') . '）';
                     break;
                 }
                 $urls = $this->parser->parseListPage($res['body'], $listUrl);
