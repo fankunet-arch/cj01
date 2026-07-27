@@ -221,4 +221,30 @@ final class CrawlControl
         Logger::info('crawl', '一键采集已触发（Web），后台执行 crawl.php --all');
         return ['ok' => true, 'message' => '一键采集已启动，进度见运行看板（本次采集完成后 1 小时内不可再次触发）'];
     }
+
+    /**
+     * 同步采集（虚拟主机 / 无 cron / 无 exec 时用）：在当前请求内直接跑一小批，
+     * 立即返回每个启用站点的诊断结果（不依赖 exec、不后台）。
+     */
+    public static function triggerSync(int $maxItems = 10): array
+    {
+        $acquired = self::acquire();
+        if (!$acquired['ok']) {
+            return ['ok' => false, 'message' => $acquired['message']];
+        }
+
+        $results = [];
+        foreach (glob(CJ_APP_ROOT . '/config/sites/*.php') ?: [] as $file) {
+            $sc = require $file;
+            if (empty($sc['enabled'])) {
+                continue;
+            }
+            $results[] = (new CrawlRunner($sc))->runSync($maxItems);
+        }
+        if ($results === []) {
+            return ['ok' => false, 'message' => '没有已启用的采集源（config/sites/*.php 中 enabled=true）'];
+        }
+        Logger::info('crawl', '同步采集完成（Web）：' . json_encode($results, JSON_UNESCAPED_UNICODE));
+        return ['ok' => true, 'results' => $results];
+    }
 }

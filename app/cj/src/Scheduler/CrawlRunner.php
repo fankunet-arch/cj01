@@ -25,6 +25,7 @@ final class CrawlRunner
     private Fetcher $fetcher;
     private SiteParser $parser;
     private bool $lastTitleEmpty = false;
+    private ?string $lastTitle = null;
 
     public function __construct(array $siteConfig)
     {
@@ -119,6 +120,84 @@ final class CrawlRunner
         }
     }
 
+    /**
+     * 同步采集（虚拟主机 / 无 cron 用）：在当前请求内直接跑一小批，返回诊断结果。
+     * 不依赖 exec/后台进程；有条数上限与时间预算，避免 Web 请求超时。
+     */
+    public function runSync(int $maxItems = 10, int $maxSeconds = 25): array
+    {
+        $siteId = $this->site['site'];
+        $r = ['site' => $siteId, 'pages' => 0, 'links' => 0, 'new' => 0, 'dup' => 0,
+              'errors' => 0, 'list_status' => null, 'note' => null, 'error' => null, 'samples' => []];
+
+        if (($this->site['render'] ?? 'php') !== 'php') {
+            $r['error'] = '该站为 headless(JS) 渲染，PHP 端不支持';
+            return $r;
+        }
+
+        // 同步模式用短间隔，避免请求超时（生产大批量仍走 CLI/cron 的礼貌间隔）
+        $this->fetcher = new Fetcher($siteId . '-sync', ['min_delay' => 1, 'max_delay' => 2]);
+        @set_time_limit($maxSeconds + 20);
+        $deadline = microtime(true) + $maxSeconds;
+
+        $runId = $this->repo->startRun($siteId);
+        try {
+            $maxPages = (int) (cj_config('crawl')['max_pages_per_run'] ?? 10);
+            for ($page = 1; $page <= $maxPages; $page++) {
+                $listUrl = sprintf($this->site['list_url'], $page);
+                $res = $this->fetcher->get($listUrl, $this->site['charset'] ?? null);
+                $r['pages']++;
+                if ($page === 1) {
+                    $r['list_status'] = $res['status'];
+                }
+                if ($res['status'] !== 200 || $res['body'] === null) {
+                    $r['errors']++;
+                    $r['note'] = "列表页抓取失败 HTTP {$res['status']}（服务器无法访问该站/被拦）";
+                    break;
+                }
+                $urls = $this->parser->parseListPage($res['body'], $listUrl);
+                if ($page === 1) {
+                    $r['links'] = count($urls);
+                }
+                if ($urls === []) {
+                    $r['note'] = '列表页解析到 0 个详情链接（选择器不匹配或已到末页）';
+                    break;
+                }
+                foreach ($urls as $url) {
+                    if (microtime(true) >= $deadline) {
+                        $r['note'] = '已达时间上限，未采完（可再次点击继续）';
+                        break 2;
+                    }
+                    if ($r['new'] >= $maxItems) {
+                        $r['note'] = "已达本次上限 {$maxItems} 条（可再次点击继续采下一批）";
+                        break 2;
+                    }
+                    if ($this->dedup->isKnownUrl($url)) {
+                        $r['dup']++;
+                        continue;
+                    }
+                    $result = $this->crawlDetail($url);
+                    if ($result === 'new') {
+                        $r['new']++;
+                        if (count($r['samples']) < 5 && $this->lastTitle !== null) {
+                            $r['samples'][] = $this->lastTitle;
+                        }
+                    } elseif ($result === 'dup') {
+                        $r['dup']++;
+                    } else {
+                        $r['errors']++;
+                    }
+                }
+            }
+            $status = ($r['errors'] > 0 && $r['new'] === 0) ? 'failed' : 'ok';
+            $this->repo->finishRun($runId, $status, $r['pages'], $r['new'], $r['dup'], $r['errors'], $r['note']);
+        } catch (\Throwable $e) {
+            $r['error'] = $e->getMessage();
+            $this->repo->finishRun($runId, 'failed', $r['pages'], $r['new'], $r['dup'], $r['errors'] + 1, mb_substr($e->getMessage(), 0, 480));
+        }
+        return $r;
+    }
+
     /** 抓取并处理单个详情页，返回 'new' | 'dup' | 'error'。 */
     private function crawlDetail(string $url): string
     {
@@ -134,6 +213,7 @@ final class CrawlRunner
 
         $raw = $this->parser->parseDetailPage($res['body']);
         $this->lastTitleEmpty = ($raw['title'] === null);
+        $this->lastTitle = $raw['title'];
 
         // 归一化（§3.3）
         $phoneNorm = ContactNormalizer::phone($raw['contact_phone']);

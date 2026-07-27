@@ -17,6 +17,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'crawl') {
         $r = CrawlControl::trigger();
         $flash = ['ok' => $r['ok'], 'text' => $r['message']];
+    } elseif ($action === 'crawl_sync') {
+        $maxItems = max(1, min(50, (int) ($_POST['max_items'] ?? 10)));
+        $r = CrawlControl::triggerSync($maxItems);
+        if (!$r['ok']) {
+            $flash = ['ok' => false, 'text' => $r['message']];
+        } else {
+            $lines = [];
+            foreach ($r['results'] as $res) {
+                if ($res['error'] !== null) {
+                    $lines[] = sprintf('[%s] 出错：%s', $res['site'], $res['error']);
+                    continue;
+                }
+                $line = sprintf('[%s] 列表页 HTTP %s，解析到 %d 个链接 → 新增 %d、重复 %d、错误 %d',
+                    $res['site'], $res['list_status'] ?? '—', $res['links'], $res['new'], $res['dup'], $res['errors']);
+                if ($res['note'] !== null) {
+                    $line .= '（' . $res['note'] . '）';
+                }
+                if ($res['samples'] !== []) {
+                    $line .= '｜示例：' . implode(' / ', array_map(fn($t) => mb_substr((string) $t, 0, 16), $res['samples']));
+                }
+                $lines[] = $line;
+            }
+            $anyNew = array_sum(array_column($r['results'], 'new')) > 0;
+            $flash = ['ok' => $anyNew, 'text' => implode("\n", $lines)];
+        }
     } elseif ($action === 'debug_toggle') {
         if (CrawlControl::debugForcedByConfig()) {
             $flash = ['ok' => false, 'text' => '调试模式已由配置 crawl.debug 强制开启，网页开关无法关闭。'];
@@ -61,7 +86,7 @@ $pageTitle = '概览';
 $renderBody = function () use ($stats, $dbError, $flash, $crawlStatus) {
     ?>
     <?php if ($flash !== null): ?>
-        <div class="card <?= $flash['ok'] ? 'status-ok' : 'status-failed' ?>"><?= cj_e($flash['text']) ?></div>
+        <div class="card <?= $flash['ok'] ? 'status-ok' : 'status-failed' ?>" style="white-space:pre-line"><?= cj_e($flash['text']) ?></div>
     <?php endif; ?>
 
     <?php if ($dbError !== null): ?>
@@ -85,10 +110,23 @@ $renderBody = function () use ($stats, $dbError, $flash, $crawlStatus) {
 
     <div class="card">
         <h2>采集</h2>
-        <form method="post" onsubmit="return confirm('确认开始一键采集全部启用站点？');">
-            <input type="hidden" name="action" value="crawl">
+
+        <form method="post" style="margin-bottom:10px">
+            <input type="hidden" name="action" value="crawl_sync">
+            <label>本次采
+                <input type="number" name="max_items" value="10" min="1" max="50" style="width:60px">
+                条
+            </label>
             <button class="btn btn-primary" type="submit" <?= $crawlStatus['can_trigger'] ? '' : 'disabled' ?>>
-                <?= $crawlStatus['running'] ? '采集运行中…' : '一键采集' ?>
+                同步采集一批（立即出结果）
+            </button>
+            <span class="muted">虚拟主机/无 cron 用：当前请求内直接采少量并显示结果，可反复点击续采。</span>
+        </form>
+
+        <form method="post" onsubmit="return confirm('后台方式需服务器允许 exec，虚拟主机通常不可用。确认尝试？');">
+            <input type="hidden" name="action" value="crawl">
+            <button class="btn" type="submit" <?= $crawlStatus['can_trigger'] ? '' : 'disabled' ?>>
+                <?= $crawlStatus['running'] ? '采集运行中…' : '后台一键采集（需 cron/exec）' ?>
             </button>
             <?php if (!$crawlStatus['can_trigger'] && $crawlStatus['reason'] !== null): ?>
                 <span class="muted"><?= cj_e($crawlStatus['reason']) ?></span>
