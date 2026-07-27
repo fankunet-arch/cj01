@@ -27,7 +27,7 @@ final class Fetcher
     /**
      * @param array $options 站点级抓取选项：
      *   'user_agent' => string      覆盖默认 UA
-     *   'headers'    => string[]     追加/覆盖请求头（如自定义 Referer）
+     *   'headers'    => string[]      追加/覆盖请求头（如自定义 Referer）
      *   'timeout'    => int          单请求总超时秒数（默认 45；同步采集用更短值防 Web 超时）
      */
     public function __construct(string $site, array $rateLimit, array $options = [])
@@ -132,6 +132,13 @@ final class Fetcher
             CURLOPT_COOKIEJAR      => $this->cookieFile,   // 会话连续（§6.2）
             CURLOPT_COOKIEFILE     => $this->cookieFile,
             CURLOPT_ENCODING       => '',                  // 接受 gzip/deflate
+            
+            // --- 兼容性与反拦截增强配置 ---
+            CURLOPT_SSL_VERIFYPEER => false,               // 绕过无效/过期 SSL 证书
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,   // 强制 IPv4，规避旧版服务器网络环境异常
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1, // 强制 HTTP/1.1，兼容传统 IIS 架构
+            
             CURLOPT_HEADERFUNCTION => function ($c, string $line) use (&$meta): int {
                 if (preg_match('/^(server|cf-ray|cf-mitigated|x-powered-by):/i', trim($line))) {
                     $meta[] = trim($line);
