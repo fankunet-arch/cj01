@@ -148,7 +148,7 @@ final class CrawlRunner
      * 同步采集（虚拟主机 / 无 cron 用）：在当前请求内直接跑一小批，返回诊断结果。
      * 不依赖 exec/后台进程；有条数上限与时间预算，避免 Web 请求超时。
      */
-    public function runSync(int $maxItems = 10, int $maxSeconds = 25): array
+    public function runSync(int $maxItems = 10, int $maxSeconds = 18): array
     {
         $siteId = $this->site['site'];
         $r = ['site' => $siteId, 'pages' => 0, 'links' => 0, 'new' => 0, 'dup' => 0,
@@ -159,9 +159,10 @@ final class CrawlRunner
             return $r;
         }
 
-        // 同步模式用短间隔，避免请求超时（生产大批量仍走 CLI/cron 的礼貌间隔）
-        $this->fetcher = new Fetcher($siteId . '-sync', ['min_delay' => 1, 'max_delay' => 2], $this->site['http'] ?? []);
-        @set_time_limit($maxSeconds + 20);
+        // 同步模式：短间隔 + 短抓取超时，尽量在虚拟主机的 Web/FastCGI 超时前跑完
+        $this->fetcher = new Fetcher($siteId . '-sync', ['min_delay' => 1, 'max_delay' => 2],
+            ['timeout' => 20] + ($this->site['http'] ?? []));
+        @set_time_limit($maxSeconds + 15);
         $deadline = microtime(true) + $maxSeconds;
 
         // 预热：先访问站点首页以获取 cookie 并形成合理 Referer（对 cookie 门/反爬有用）
@@ -170,9 +171,31 @@ final class CrawlRunner
         }
 
         $runId = $this->repo->startRun($siteId);
+
+        // 关闭钩子：请求被服务器超时/致命杀掉时，也把运行记录标记为失败并记下卡住的阶段，
+        // 避免看板永远停在 running，同时给出诊断线索。
+        $stage = '启动';
+        $finished = false;
+        $repo = $this->repo;
+        register_shutdown_function(function () use (&$finished, &$stage, &$r, $runId, $repo): void {
+            if ($finished) {
+                return;
+            }
+            try {
+                $repo->finishRun($runId, 'failed', $r['pages'], $r['new'], $r['dup'], $r['errors'],
+                    '请求异常终止（疑似 Web/FastCGI 超时或致命错误），最后阶段：' . $stage);
+            } catch (\Throwable) {
+            }
+        });
+
         try {
             $maxPages = (int) (cj_config('crawl')['max_pages_per_run'] ?? 10);
             for ($page = 1; $page <= $maxPages; $page++) {
+                if (microtime(true) >= $deadline) {   // 翻页前先看时间预算
+                    $r['note'] = '已达时间上限，未采完（可再次点击继续）';
+                    break;
+                }
+                $stage = "抓取列表页 p{$page}";
                 $listUrl = sprintf($this->site['list_url'], $page);
                 $res = $this->fetcher->get($listUrl, $this->site['charset'] ?? null);
                 $r['pages']++;
@@ -210,6 +233,7 @@ final class CrawlRunner
                             $r['dup']++;
                             continue;
                         }
+                        $stage = "入库第 " . ($r['new'] + 1) . " 条（p{$page}）";
                         $result = $this->processRecord($rec, $rec['source_url']);
                         if ($result === 'new') {
                             $r['new']++;
@@ -259,9 +283,11 @@ final class CrawlRunner
             }
             $status = ($r['errors'] > 0 && $r['new'] === 0) ? 'failed' : 'ok';
             $this->repo->finishRun($runId, $status, $r['pages'], $r['new'], $r['dup'], $r['errors'], $r['note']);
+            $finished = true;
         } catch (\Throwable $e) {
             $r['error'] = $e->getMessage();
             $this->repo->finishRun($runId, 'failed', $r['pages'], $r['new'], $r['dup'], $r['errors'] + 1, mb_substr($e->getMessage(), 0, 480));
+            $finished = true;
         }
         return $r;
     }

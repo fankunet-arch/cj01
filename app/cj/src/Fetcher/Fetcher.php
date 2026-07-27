@@ -22,17 +22,20 @@ final class Fetcher
     private array $extraHeaders;
     private ?string $uaOverride;
     private ?string $lastServer = null;
+    private int $timeout;
 
     /**
      * @param array $options 站点级抓取选项：
      *   'user_agent' => string      覆盖默认 UA
      *   'headers'    => string[]     追加/覆盖请求头（如自定义 Referer）
+     *   'timeout'    => int          单请求总超时秒数（默认 45；同步采集用更短值防 Web 超时）
      */
     public function __construct(string $site, array $rateLimit, array $options = [])
     {
         $this->rateLimit = $rateLimit + ['min_delay' => 8, 'max_delay' => 20];
         $this->extraHeaders = $options['headers'] ?? [];
         $this->uaOverride = $options['user_agent'] ?? null;
+        $this->timeout = (int) ($options['timeout'] ?? 45);
         $dir = (cj_config('log_dir') ?: CJ_APP_ROOT . '/logs') . '/cookies';
         if (!is_dir($dir)) {
             @mkdir($dir, 0750, true);
@@ -122,8 +125,8 @@ final class Fetcher
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_MAXREDIRS      => 5,
-            CURLOPT_CONNECTTIMEOUT => 15,
-            CURLOPT_TIMEOUT        => 45,
+            CURLOPT_CONNECTTIMEOUT => min(15, $this->timeout),
+            CURLOPT_TIMEOUT        => $this->timeout,
             CURLOPT_USERAGENT      => $ua,
             CURLOPT_HTTPHEADER     => $headers,
             CURLOPT_COOKIEJAR      => $this->cookieFile,   // 会话连续（§6.2）

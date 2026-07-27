@@ -106,13 +106,31 @@ final class CrawlControl
         return $fromDb === null ? $fromFile : max($fromFile, $fromDb);
     }
 
-    /** 是否有采集任务正在运行（6 小时前的 running 视为僵尸记录，不阻塞）。 */
+    /**
+     * 回收僵尸 running 记录：请求被超时/致命杀掉时会留下永远 running 的记录，
+     * 超过 3 分钟的 running 一律标记失败（同步采集通常 ≤20 秒，绝无正常 3 分钟仍 running）。
+     */
+    public static function reapStaleRuns(): void
+    {
+        try {
+            Db::crawler()->exec(
+                "UPDATE cj_crawl_runs
+                 SET status = 'failed', finished_at = NOW(),
+                     note = CONCAT(COALESCE(note, ''), ' [自动回收：疑似超时/中断]')
+                 WHERE status = 'running' AND started_at < NOW() - INTERVAL 3 MINUTE"
+            );
+        } catch (\Throwable) {
+        }
+    }
+
+    /** 是否有采集任务正在运行（先回收僵尸记录，仅近 3 分钟的 running 才算“运行中”）。 */
     public static function isRunning(): bool
     {
+        self::reapStaleRuns();
         try {
             return (bool) Db::crawler()->query(
                 "SELECT 1 FROM cj_crawl_runs
-                 WHERE status = 'running' AND started_at > NOW() - INTERVAL 6 HOUR
+                 WHERE status = 'running' AND started_at > NOW() - INTERVAL 3 MINUTE
                  LIMIT 1"
             )->fetchColumn();
         } catch (\Throwable) {
