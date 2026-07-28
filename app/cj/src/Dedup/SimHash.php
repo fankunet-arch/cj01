@@ -56,14 +56,20 @@ final class SimHash
         return unpack('J', substr(md5($token, true), 0, 8))[1];
     }
 
-    /** 两个 64 位指纹的汉明距离。 */
+    /**
+     * 两个 64 位指纹的汉明距离。
+     *
+     * ⚠ 必须固定扫描 64 位，不能用 `while ($x) { $x &= $x - 1; }` 的位清除算法：
+     * 指纹最高位为 1 时 $x 为负数，清到只剩符号位后 $x === PHP_INT_MIN，
+     * 而 PHP_INT_MIN - 1 会溢出成 float 并在按位运算中回落为 PHP_INT_MIN，
+     * 导致 $x 不再变化、while 永不退出（整个采集请求挂死）。
+     */
     public static function hammingDistance(int $a, int $b): int
     {
         $x = $a ^ $b;
         $dist = 0;
-        while ($x !== 0) {
-            $dist++;
-            $x &= $x - 1;   // 清除最低位的 1
+        for ($i = 0; $i < 64; $i++) {
+            $dist += ($x >> $i) & 1;   // 算术右移：第 63 位对负数同样取到 1
         }
         return $dist;
     }
