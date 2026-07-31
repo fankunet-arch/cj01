@@ -1,14 +1,30 @@
 -- ============================================================
 -- 招聘采集程序 采集库（crawler_db）建库导入文件
 -- 依据：《招聘采集程序_需求与设计文档_v1.2》 §5
--- 目标环境：MySQL 8.4
+-- 目标环境：MySQL 8.0+/8.4 与 MariaDB 10.2+ 均可（见下方排序规则说明）
 -- 导入方式：mysql -u root -p < db/01_crawler_db_schema.sql
 -- 命名约定：所有采集库表统一 cj_ 前缀（cj = 采集）
+--
+-- 【排序规则】统一用 utf8mb4_unicode_520_ci（UCA 5.2.0），理由：
+--   · MySQL 5.6+/8.4 与 MariaDB 10.x 都支持，换数据库无需改本文件
+--     （utf8mb4_0900_ai_ci 是 MySQL 8.0+ 专有，MariaDB 报 Unknown collation 导入失败）
+--   · 正确处理西语重音（Málaga=Malaga、España=Espana）与中文
+--   · 正确区分 4 字节字符（emoji）——utf8mb4_general_ci / utf8mb4_unicode_ci
+--     会把不同 emoji 判为相等，而招聘正文里确实带 📍✅ 等符号
+--
+-- 【已建好的库如何切换】（本文件用 IF NOT EXISTS，不会动已有库）：
+--   ALTER DATABASE crawler_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;
+--   ALTER TABLE cj_raw_pages    CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;
+--   ALTER TABLE cj_jobs_clean   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;
+--   ALTER TABLE cj_dedup_log    CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;
+--   ALTER TABLE cj_review_queue CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;
+--   ALTER TABLE cj_crawl_runs   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;
+--   ALTER TABLE cj_import_map   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci;
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS `crawler_db`
     DEFAULT CHARACTER SET utf8mb4
-    DEFAULT COLLATE utf8mb4_0900_ai_ci;
+    DEFAULT COLLATE utf8mb4_unicode_520_ci;
 
 USE `crawler_db`;
 
@@ -25,7 +41,7 @@ CREATE TABLE IF NOT EXISTS `cj_raw_pages` (
     `fetched_at`    DATETIME     NOT NULL COMMENT '抓取时间',
     UNIQUE KEY `uk_url` (`source_url`),
     KEY `idx_site` (`source_site`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='原始抓取存档';
 
 -- ------------------------------------------------------------
@@ -62,7 +78,7 @@ CREATE TABLE IF NOT EXISTS `cj_jobs_clean` (
     KEY `idx_simhash` (`simhash`),
     KEY `idx_status` (`dedup_status`),
     KEY `idx_purge_after` (`purge_after`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='清洗后的统一招聘数据模型';
 
 -- ------------------------------------------------------------
@@ -78,7 +94,7 @@ CREATE TABLE IF NOT EXISTS `cj_dedup_log` (
     `decision`        ENUM('dup','review','unique') NOT NULL COMMENT '判定结论',
     `created_at`      DATETIME NOT NULL,
     KEY `idx_job` (`job_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='去重判定日志';
 
 -- ------------------------------------------------------------
@@ -93,7 +109,7 @@ CREATE TABLE IF NOT EXISTS `cj_review_queue` (
     `resolution`   ENUM('keep','merge','discard') NULL COMMENT '复核结论',
     `created_at`   DATETIME NOT NULL,
     KEY `idx_resolved` (`resolved`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='人工复核队列';
 
 -- ------------------------------------------------------------
@@ -111,7 +127,7 @@ CREATE TABLE IF NOT EXISTS `cj_crawl_runs` (
     `status`        ENUM('running','ok','failed') DEFAULT 'running',
     `note`          VARCHAR(500) COMMENT '备注/告警信息',
     KEY `idx_site_time` (`source_site`, `started_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='采集任务运行记录';
 
 -- ------------------------------------------------------------
@@ -130,5 +146,5 @@ CREATE TABLE IF NOT EXISTS `cj_import_map` (
     UNIQUE KEY `uk_main` (`main_job_id`),
     KEY `idx_crawler` (`crawler_job_id`),
     KEY `idx_batch` (`import_batch`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='采集库↔主库导入映射账本';
