@@ -37,31 +37,42 @@ cj01/
 │       ├── web/             # 内部页面业务逻辑（入口在 zp_html/cj，逻辑在这里）
 │       ├── bin/             # CLI 入口（cron 调用，不经 Web）
 │       └── logs/            # 日志（不可对外）
-├── db/                      # 数据库导入文件（MySQL 8.4）
+├── db/                      # 数据库导入文件（MySQL 8.0/8.4 与 MariaDB 10.2+ 通用）
+│   ├── 00_zhaopin_main_schema.sql    # 主库全部 zhaopin_ 表（全新搭建用，已内建 simhash/origin）
 │   ├── 01_crawler_db_schema.sql      # 采集库 crawler_db 全部 cj_ 表
-│   ├── 02_zhaopin_main_ddl_patch.sql # 主库 zhaopin_posts 配合改动（新增 simhash/origin）
+│   ├── 02_zhaopin_main_ddl_patch.sql # 主库已存在时的增量补丁（只加 simhash/origin 两列）
 │   └── 03_sample_data.sql            # 可选：开发联调样例数据
 └── docs/                    # 需求与设计文档
 ```
 
 ## 安装部署
 
-### 1. 数据库（MySQL 8.4）
+### 1. 数据库（MySQL 8.0/8.4 与 MariaDB 10.2+ 通用）
+
+所有 SQL 文件均为跨库通用，两种数据库导入命令相同、文件无需改动，可无缝切换。
+统一采用 `utf8mb4_unicode_520_ci` + `ROW_FORMAT=DYNAMIC`（理由见各文件头部说明）。
 
 ```bash
-# 建采集库（含全部 cj_ 表）
+# ① 主库：全新搭建（已内建采集器所需的 simhash/origin 两列）
+mysql -u root -p -e "CREATE DATABASE 你的主库名 DEFAULT CHARACTER SET utf8mb4 \
+    DEFAULT COLLATE utf8mb4_unicode_520_ci;"
+mysql -u root -p 你的主库名 < db/00_zhaopin_main_schema.sql
+#   ↑ 主库若已存在且有数据，改用增量补丁：
+#     mysql -u root -p 你的主库名 < db/02_zhaopin_main_ddl_patch.sql
+
+# ② 采集库（含全部 cj_ 表，文件内自带 CREATE DATABASE）
 mysql -u root -p < db/01_crawler_db_schema.sql
 
-# zhaopin 主库配合改动（在主库执行；给 zhaopin_posts 加 simhash/origin 两列）
-# 主库名按实际填（导出示例为 mhdlmskzoi87b0i）
-mysql -u root -p 你的主库名 < db/02_zhaopin_main_ddl_patch.sql
-
-# 可选：开发联调样例数据
+# ③ 可选：开发联调样例数据
 mysql -u root -p crawler_db < db/03_sample_data.sql
 ```
 
-> 主库真实招聘表为 `zhaopin_posts`，已自带 `phone_norm`（电话去重）与 `content_hash`
-> （精确去重），故补丁只新增 `simhash`（模糊去重）与 `origin`（来源标记）两列。
+> 主库招聘表 `zhaopin_posts` 自带 `phone_norm`（电话去重）与 `content_hash`（精确去重），
+> 采集器只额外需要 `simhash`（模糊去重）与 `origin`（来源标记）两列——
+> `00` 文件已内建，`02` 补丁用于给已有主库增量添加。
+>
+> `00` 文件只建结构；分类 `zhaopin_categories` 与地区 `zhaopin_regions` 需有数据
+> 主站发布页才能使用，请自行导入基础数据。
 
 主库存量数据回填 `simhash`（跑一次；`phone_norm`/`origin` 无需回填）：
 
