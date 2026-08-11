@@ -1,0 +1,65 @@
+/* ===================== 用户后台（/user）专属样式 ===================== */
+
+.u-badge{font-size:12px;font-weight:800;letter-spacing:.05em;color:#fff;background:var(--accent);border-radius:8px;padding:5px 10px}
+.u-name{font-size:13px;color:var(--ink-soft)}
+.u-out{font-size:13px;font-weight:700;color:var(--accent)}
+.u-shell{max-width:760px}
+.u-h1{font-family:var(--disp);font-weight:800;font-size:26px;margin-bottom:16px}
+.u-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.u-top h1{font-family:var(--disp);font-weight:800;font-size:26px}
+.u-notice{font-size:14px;font-weight:700;color:var(--jade);margin-bottom:14px}
+.u-err{font-size:13.5px;color:#c0392b;background:var(--coral-soft);border-radius:10px;padding:10px 13px;margin-bottom:14px}
+
+.u-btn{display:inline-block;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;font-weight:700;font-size:13.5px;padding:9px 14px;cursor:pointer}
+.u-btn.sm{font-size:12.5px;padding:6px 10px}
+.u-btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.u-btn.danger{color:#c0392b;border-color:rgba(192,57,43,.35)}
+
+/* 我的发布列表 */
+.u-list{display:flex;flex-direction:column;gap:12px}
+.u-item{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;box-shadow:var(--shadow-card)}
+.u-item.off{opacity:.65}
+.u-itop{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+.u-status{font-size:12px;font-weight:700;color:var(--ink-soft)}
+.u-status.on{color:var(--jade)}
+.u-ititle{display:block;font-weight:700;font-size:16px;margin-bottom:6px}
+.u-imeta{font-size:12.5px;color:var(--ink-soft);margin-bottom:12px}
+.u-iact{display:flex;gap:8px;flex-wrap:wrap}
+.u-iact form{display:inline-block}
+
+/* 编辑表单（复用发布页字段风格） */
+.u-panel{background:#fff;border:1px solid var(--line);border-radius:20px;padding:26px;box-shadow:var(--shadow-card)}
+.u-panel .field{margin-bottom:18px}
+.u-panel .lab{display:block;font-size:13px;font-weight:700;color:var(--ink);margin-bottom:8px}
+.u-panel .lab .req{color:var(--accent)}
+.u-panel .lab .opt{color:var(--ink-soft);font-weight:500;font-size:12px;margin-left:4px}
+.u-panel .input,.u-panel .area{width:100%;border:1px solid var(--line);background:#fff;border-radius:13px;padding:13px 14px;font-family:var(--body);font-size:15px;color:var(--ink);outline:none}
+.u-panel .input:focus,.u-panel .area:focus,.u-panel .sel:focus{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.u-panel .area{resize:none;min-height:130px;line-height:1.5}
+.u-panel .selwrap{position:relative;display:block}
+.u-panel .selwrap::after{content:"▾";position:absolute;right:15px;top:50%;transform:translateY(-50%);color:var(--ink-soft);pointer-events:none;font-size:12px}
+.u-panel .sel{width:100%;appearance:none;-webkit-appearance:none;border:1px solid var(--line);background:#fff;border-radius:13px;padding:13px 34px 13px 14px;font-family:var(--body);font-size:15px;color:var(--ink);outline:none;cursor:pointer}
+.u-panel .row{display:flex;gap:12px;flex-wrap:wrap}
+.u-panel .row .field{flex:1;min-width:140px}
+.u-submit{width:100%;border:0;cursor:pointer;border-radius:15px;background:var(--accent);color:#fff;font-weight:700;font-size:16px;padding:16px;box-shadow:0 12px 24px -10px var(--accent)}
+
+/* 登录页 */
+.u-loginwrap{display:flex;justify-content:center;padding-top:8vh}
+.u-login{background:#fff;border:1px solid var(--line);border-radius:20px;padding:30px;box-shadow:var(--shadow-card);width:100%;max-width:400px;text-align:center}
+.u-login h1{font-family:var(--disp);font-weight:800;font-size:24px;margin-bottom:8px}
+.u-login .sub{font-size:13.5px;color:var(--ink-soft);line-height:1.7;margin-bottom:20px}
+.u-login .sub b{color:var(--ink)}
+.u-google{display:flex;align-items:center;justify-content:center;gap:10px;border:1px solid var(--line);border-radius:13px;padding:13px;font-weight:700;font-size:15px;background:#fff;box-shadow:var(--shadow-card)}
+.u-devbtn{display:block;margin-top:12px}
+.u-devnote{font-size:11.5px;color:#c0392b;margin-top:8px}
+.u-guest{margin-top:18px;font-size:12.5px;color:var(--ink-soft)}
+.u-guest a{color:var(--accent);font-weight:700}
+
+/* 置顶券 */
+.u-coupon{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;background:#FFF8E7;border:1px solid rgba(255,200,61,.5);border-radius:14px;padding:13px 16px;margin-bottom:16px}
+.u-coupon-info{font-size:13.5px;color:#6b5200;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.u-coupon-info b{color:#5a4500}
+.u-coupon-form{display:flex;gap:8px}
+.u-coupon-form .input{width:170px;border:1px solid rgba(255,200,61,.6);border-radius:10px;padding:9px 11px;font-family:var(--body);font-size:13.5px;outline:none;background:#fff}
+.u-btn.gold{background:var(--sun);border-color:var(--sun);color:#5a4500;font-weight:800}
+.u-topbadge{font-size:12px;font-weight:800;color:#5a4500;background:var(--sun);border-radius:8px;padding:6px 10px;align-self:center}
