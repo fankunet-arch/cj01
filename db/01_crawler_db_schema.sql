@@ -1,14 +1,36 @@
 -- ============================================================
 -- 招聘采集程序 采集库（crawler_db）建库导入文件
 -- 依据：《招聘采集程序_需求与设计文档_v1.2》 §5
--- 目标环境：MySQL 8.4
--- 导入方式：mysql -u root -p < db/01_crawler_db_schema.sql
 -- 命名约定：所有采集库表统一 cj_ 前缀（cj = 采集）
+--
+-- 【跨库通用】本文件在 MySQL 8.0/8.4 与 MariaDB 10.2+ 上均可直接导入，
+--             两种数据库之间可无缝切换，无需改动本文件。为此做了三处约定：
+--
+--   1) 排序规则 utf8mb4_unicode_520_ci（UCA 5.2.0）
+--      · MySQL 5.6+/8.4 与 MariaDB 10.x 都支持
+--        （utf8mb4_0900_ai_ci 是 MySQL 8.0+ 专有，MariaDB 会报
+--         Unknown collation 导致整个导入失败，故不可用）
+--      · 正确处理西语重音（Málaga=Malaga、España=Espana）与中文
+--      · 正确区分 4 字节字符（emoji）——utf8mb4_general_ci / utf8mb4_unicode_ci
+--        会把不同 emoji 判为相等，而招聘正文确实带 📍✅ 等符号
+--
+--   2) 显式 ROW_FORMAT=DYNAMIC
+--      InnoDB 索引长度上限依赖行格式：DYNAMIC 为 3072 字节，
+--      老的 COMPACT 仅 767 字节（utf8mb4 下连 VARCHAR(255) 唯一索引都建不了）。
+--      两边现代版本默认虽都是 DYNAMIC，但显式声明可避免服务器配置差异导致导入失败。
+--
+--   3) 只用两边通用语法：无 MySQL 专有函数/子句，保留字 `signal` 已加反引号。
+--
+-- 导入方式（两种数据库命令相同）：
+--   mysql   -u root -p < db/01_crawler_db_schema.sql
+--   mariadb -u root -p < db/01_crawler_db_schema.sql
 -- ============================================================
+
+SET NAMES utf8mb4;
 
 CREATE DATABASE IF NOT EXISTS `crawler_db`
     DEFAULT CHARACTER SET utf8mb4
-    DEFAULT COLLATE utf8mb4_0900_ai_ci;
+    DEFAULT COLLATE utf8mb4_unicode_520_ci;
 
 USE `crawler_db`;
 
@@ -25,7 +47,8 @@ CREATE TABLE IF NOT EXISTS `cj_raw_pages` (
     `fetched_at`    DATETIME     NOT NULL COMMENT '抓取时间',
     UNIQUE KEY `uk_url` (`source_url`),
     KEY `idx_site` (`source_site`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='原始抓取存档';
 
 -- ------------------------------------------------------------
@@ -62,11 +85,13 @@ CREATE TABLE IF NOT EXISTS `cj_jobs_clean` (
     KEY `idx_simhash` (`simhash`),
     KEY `idx_status` (`dedup_status`),
     KEY `idx_purge_after` (`purge_after`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='清洗后的统一招聘数据模型';
 
 -- ------------------------------------------------------------
 -- 5.3 cj_dedup_log — 去重判定日志
+-- 注：signal 是 MySQL 保留字，必须加反引号
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `cj_dedup_log` (
     `id`              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -78,7 +103,8 @@ CREATE TABLE IF NOT EXISTS `cj_dedup_log` (
     `decision`        ENUM('dup','review','unique') NOT NULL COMMENT '判定结论',
     `created_at`      DATETIME NOT NULL,
     KEY `idx_job` (`job_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='去重判定日志';
 
 -- ------------------------------------------------------------
@@ -93,7 +119,8 @@ CREATE TABLE IF NOT EXISTS `cj_review_queue` (
     `resolution`   ENUM('keep','merge','discard') NULL COMMENT '复核结论',
     `created_at`   DATETIME NOT NULL,
     KEY `idx_resolved` (`resolved`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='人工复核队列';
 
 -- ------------------------------------------------------------
@@ -110,8 +137,10 @@ CREATE TABLE IF NOT EXISTS `cj_crawl_runs` (
     `errors`        INT DEFAULT 0 COMMENT '错误数',
     `status`        ENUM('running','ok','failed') DEFAULT 'running',
     `note`          VARCHAR(500) COMMENT '备注/告警信息',
-    KEY `idx_site_time` (`source_site`, `started_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+    KEY `idx_site_time` (`source_site`, `started_at`),
+    KEY `idx_status_time` (`status`, `started_at`)
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='采集任务运行记录';
 
 -- ------------------------------------------------------------
@@ -130,5 +159,6 @@ CREATE TABLE IF NOT EXISTS `cj_import_map` (
     UNIQUE KEY `uk_main` (`main_job_id`),
     KEY `idx_crawler` (`crawler_job_id`),
     KEY `idx_batch` (`import_batch`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC
+  DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci
   COMMENT='采集库↔主库导入映射账本';

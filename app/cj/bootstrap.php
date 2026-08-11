@@ -7,8 +7,13 @@
 
 declare(strict_types=1);
 
-define('CJ_APP_ROOT', __DIR__);
-define('CJ_PROJECT_ROOT', dirname(__DIR__));
+// 用 defined() 守卫：本文件被重复引入（或调用方已先行定义）时不发常量重定义告警
+if (!defined('CJ_APP_ROOT')) {
+    define('CJ_APP_ROOT', __DIR__);
+}
+if (!defined('CJ_PROJECT_ROOT')) {
+    define('CJ_PROJECT_ROOT', dirname(__DIR__));
+}
 
 date_default_timezone_set('Europe/Madrid');
 mb_internal_encoding('UTF-8');
