@@ -7,12 +7,22 @@
 --             两种数据库之间可无缝切换，无需改动本文件。为此做了三处约定：
 --
 --   1) 排序规则 utf8mb4_unicode_520_ci（UCA 5.2.0）
---      · MySQL 5.6+/8.4 与 MariaDB 10.x 都支持
---        （utf8mb4_0900_ai_ci 是 MySQL 8.0+ 专有，MariaDB 会报
---         Unknown collation 导致整个导入失败，故不可用）
---      · 正确处理西语重音（Málaga=Malaga、España=Espana）与中文
---      · 正确区分 4 字节字符（emoji）——utf8mb4_general_ci / utf8mb4_unicode_ci
---        会把不同 emoji 判为相等，而招聘正文确实带 📍✅ 等符号
+--      · 是两边都有、且版本最新的 UCA 排序规则：
+--        MySQL 5.6+/8.0/8.4 与 MariaDB 10.x 全部支持。
+--        （utf8mb4_0900_ai_ci 是 MySQL 8.0+ 专有，MariaDB 报 Unknown collation；
+--         utf8mb4_uca1400_ai_ci 是 MariaDB 11.x 专有，MySQL 不认——都会让整个
+--         导入直接失败，故都不可用。）
+--      · 正确处理西语重音与大小写：Málaga=Malaga、España=Espana、a=A，
+--        搜索时用户不打重音也能命中——这正是本站需要的。
+--      · 汉字按码位区分（张≠章），中文内容不会误判相等。
+--      · 已知差异（实测）：MySQL 8.0 下不同 emoji 判为不等，MariaDB 10.11 下
+--        判为相等（emoji 是 Unicode 6.0+ 才加入，晚于 UCA 5.2.0，MariaDB 给
+--        这些码位同一权重）。两边通用的排序规则里没有能区分 emoji 的
+--        （general_ci / unicode_ci 同样判等，只有 utf8mb4_bin 能区分，但它
+--        连大小写都区分，会破坏上面的西语检索）。
+--        对本项目无实质影响：去重靠 content_hash（SHA-256 精确比对）与
+--        phone_norm（归一化后的纯数字），都不走排序规则；受影响的只有
+--        类别名/敏感词这类唯一键的极端场景（两个名字只差一个 emoji）。
 --
 --   2) 显式 ROW_FORMAT=DYNAMIC
 --      InnoDB 索引长度上限依赖行格式：DYNAMIC 为 3072 字节，

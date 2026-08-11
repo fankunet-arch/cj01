@@ -7,9 +7,13 @@
 -- 【与原导出的差异】
 --   1) 排序规则 utf8mb4_0900_ai_ci → utf8mb4_unicode_520_ci
 --      原值是 MySQL 8.0+ 专有，MariaDB 报 Unknown collation 导致导入失败。
---      520（UCA 5.2.0）两边都支持，且正确处理西语重音（Málaga=Malaga、
---      España=Espana）、中文，以及 4 字节 emoji（general_ci/unicode_ci 会把
---      不同 emoji 判为相等，而帖子正文常带 📍✅ 等符号）。
+--      520（UCA 5.2.0）是两边都有、版本又最新的 UCA 排序规则，
+--      正确处理西语重音与大小写（Málaga=Malaga、España=Espana、a=A），
+--      汉字按码位区分（张≠章）。
+--      已知差异（实测）：不同 emoji 在 MySQL 8.0 下判为不等、MariaDB 10.11 下
+--      判为相等；两边通用的排序规则里没有能区分 emoji 的，对本项目也无实质
+--      影响（去重走 content_hash/phone_norm，不依赖排序规则）。详见
+--      db/01_crawler_db_schema.sql 头部说明。
 --   2) 显式 ROW_FORMAT=DYNAMIC
 --      InnoDB 索引长度上限依赖行格式：DYNAMIC 3072 字节，老的 COMPACT 仅 767 字节。
 --      本库 zhaopin_admins.uk_email 是 VARCHAR(255) utf8mb4 唯一索引（1020 字节），
@@ -28,8 +32,9 @@
 --   mysql   -u root -p 你的库名 < db/00_zhaopin_main_schema.sql
 --   mariadb -u root -p 你的库名 < db/00_zhaopin_main_schema.sql
 --
--- 注：本文件只建结构。分类（zhaopin_categories）与地区（zhaopin_regions）
---     需要有数据主站发布页才能用，请自行导入你的基础数据。
+-- 注：本文件只建结构，不含任何数据。全新搭建时必须紧接着导入基础数据：
+--       mysql -u root -p 你的库名 < db/04_zhaopin_seed_data.sql
+--     否则发布页地区/类别下拉为空、后台「参数配置」页空白、且无人能登录后台。
 -- ============================================================
 
 SET NAMES utf8mb4;

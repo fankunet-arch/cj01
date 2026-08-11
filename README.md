@@ -13,6 +13,7 @@ zhaopin.es 冷启动期的**独立临时采集模块**：从四个西班牙华�
 ```
 cj01/
 ├── zp_html/                 # ← zhaopin 主站 web root（DocumentRoot 指向这里）
+│   ├── .htaccess            # 主站路由：无扩展名 URL → 同名 .php（缺它站内链接全 404）
 │   └── cj/                  # 采集器唯一对外暴露目录，访问 http://zhaopin.es/cj/
 │       ├── index.php        # 内部概览入口（薄转发到 ../../app/cj/bootstrap.php）
 │       ├── review.php       # 人工复核队列入口
@@ -20,6 +21,8 @@ cj01/
 │       ├── assets/          # 静态资源（/cj/assets/…）
 │       └── .htaccess        # Apache 目录保护
 ├── app/                     # ← zhaopin 主站私有目录（web root 之外，网络不可访问）
+│   ├── config/
+│   │   └── config.example.php # 主站配置模板（复制为 config.php，缺它全站 500）
 │   └── cj/                  # 采集器私有逻辑
 │       ├── bootstrap.php    # 统一引导（自动加载、配置、时区）
 │       ├── config/
@@ -41,38 +44,72 @@ cj01/
 │   ├── 00_zhaopin_main_schema.sql    # 主库全部 zhaopin_ 表（全新搭建用，已内建 simhash/origin）
 │   ├── 01_crawler_db_schema.sql      # 采集库 crawler_db 全部 cj_ 表
 │   ├── 02_zhaopin_main_ddl_patch.sql # 主库已存在时的增量补丁（只加 simhash/origin 两列）
-│   └── 03_sample_data.sql            # 可选：开发联调样例数据
+│   ├── 03_sample_data.sql            # 可选：开发联调样例数据
+│   └── 04_zhaopin_seed_data.sql      # 主库基础数据（参数/地区/类别/敏感词/管理员，全新搭建必需）
 └── docs/                    # 需求与设计文档
 ```
 
 ## 安装部署
+
+### 0. 全新搭建速查表
+
+从零搭一套（服务器上没有任何老数据）需要且只需要下面这些，缺一项就有对应故障：
+
+| 步骤 | 要做的事 | 漏了会怎样 |
+|---|---|---|
+| 1 | 导入 `db/00_zhaopin_main_schema.sql` | 主库没有表，全站报错 |
+| 2 | 导入 `db/04_zhaopin_seed_data.sql`（**先改管理员邮箱**） | 发布页下拉为空、后台参数页空白、无人能登录后台 |
+| 3 | 导入 `db/01_crawler_db_schema.sql` | 采集器所有页面报错 |
+| 4 | `app/config/config.example.php` → `config.php` 并填写 | 全站 HTTP 500 |
+| 5 | `app/cj/config/config.example.php` → `config.php` 并填写 | 采集器页面报错 |
+| 6 | Apache 保证 `mod_rewrite` + `AllowOverride All`；Nginx 按 §3 配 `try_files` | 站内每个链接都 404 |
+| 7 | `app/cj/logs/` 可写（属主给 PHP 运行账号） | 采集无法写日志 |
 
 ### 1. 数据库（MySQL 8.0/8.4 与 MariaDB 10.2+ 通用）
 
 所有 SQL 文件均为跨库通用，两种数据库导入命令相同、文件无需改动，可无缝切换。
 统一采用 `utf8mb4_unicode_520_ci` + `ROW_FORMAT=DYNAMIC`（理由见各文件头部说明）。
 
+全新搭建（没有任何老数据要迁移）按顺序执行三条命令即可：
+
 ```bash
-# ① 主库：全新搭建（已内建采集器所需的 simhash/origin 两列）
+# ① 主库建表（已内建采集器所需的 simhash/origin 两列）
 mysql -u root -p -e "CREATE DATABASE 你的主库名 DEFAULT CHARACTER SET utf8mb4 \
     DEFAULT COLLATE utf8mb4_unicode_520_ci;"
 mysql -u root -p 你的主库名 < db/00_zhaopin_main_schema.sql
-#   ↑ 主库若已存在且有数据，改用增量补丁：
-#     mysql -u root -p 你的主库名 < db/02_zhaopin_main_ddl_patch.sql
 
-# ② 采集库（含全部 cj_ 表，文件内自带 CREATE DATABASE）
+# ② 主库基础数据 ★必需★（导入前先改文件末尾的管理员邮箱）
+mysql -u root -p 你的主库名 < db/04_zhaopin_seed_data.sql
+
+# ③ 采集库（含全部 cj_ 表，文件内自带 CREATE DATABASE）
 mysql -u root -p < db/01_crawler_db_schema.sql
 
-# ③ 可选：开发联调样例数据
+# 可选：开发联调样例数据
 mysql -u root -p crawler_db < db/03_sample_data.sql
 ```
 
-> 主库招聘表 `zhaopin_posts` 自带 `phone_norm`（电话去重）与 `content_hash`（精确去重），
-> 采集器只额外需要 `simhash`（模糊去重）与 `origin`（来源标记）两列——
-> `00` 文件已内建，`02` 补丁用于给已有主库增量添加。
+MariaDB 把 `mysql` 换成 `mariadb`，文件本身无需任何改动。
+
+> **② 不可跳过**，`00` 只建空表结构。缺基础数据会出现三个致命现象：
+> 发布页地区/类别下拉为空（发不出任何信息）、后台「参数配置」页一片空白
+> （该页只 UPDATE 已存在的键，表空就什么都改不了）、后台无人能登录
+> （管理员是「Google 登录 + 邮箱白名单」制，`zhaopin_admins` 空 = 全部拒绝）。
 >
-> `00` 文件只建结构；分类 `zhaopin_categories` 与地区 `zhaopin_regions` 需有数据
-> 主站发布页才能使用，请自行导入基础数据。
+> **导入 `04` 前必须改一处**：文件末尾的 `you@example.com` 改成你自己用来登录
+> Google 的真实邮箱，`role` 保持 `2`（超级管理员；`1` 是普通管理员，进不了
+> 「参数配置」「管理员」「置顶券」三页，也就没法再添加别的管理员）。
+> 文件可重复导入，不会覆盖你后来改过的值。
+>
+> `04` 里的城市名用 `MADRID` / `BARCELONA` 这类大写西语写法，是刻意为之：
+> 采集器导入时按城市名在 `zhaopin_regions` 里查 `region_id`，目标站正是这种写法，
+> 改成中文名会导致采集数据全部落进兜底的「其他地区」。
+>
+> **主库已存在且有数据**时不要用 `00`，改用增量补丁只加两列：
+> `mysql -u root -p 你的主库名 < db/02_zhaopin_main_ddl_patch.sql`，
+> 基础数据也按需自行取舍。
+>
+> 主库招聘表 `zhaopin_posts` 自带 `phone_norm`（电话去重）与 `content_hash`（精确去重），
+> 采集器只额外需要 `simhash`（模糊去重）与 `origin`（来源标记）两列。
 
 主库存量数据回填 `simhash`（跑一次；`phone_norm`/`origin` 无需回填）：
 
@@ -82,6 +119,21 @@ php app/cj/bin/backfill_main.php
 ```
 
 ### 2. 应用配置
+
+两份配置都不进版本库（`.gitignore` 已排除），部署时各复制一份填写。
+
+**主站配置（缺它全站 500）：**
+
+```bash
+cp app/config/config.example.php app/config/config.php
+# 必填：db 段（库名/账号/口令，prefix 保持 zhaopin_）、site.base_url（线上真实域名，不带结尾斜杠）
+# 选填：google_oauth（后台与用户登录用，留空则登录页提示"登录服务尚未配置"，其余页面正常）
+#       brevo（举报通知邮件，留空则不发信）
+# ★ dev.fake_admin_email / dev.fake_user_name 线上必须留空 ★
+#   非空时登录页会出现"本地调试直登"按钮，可绕过 Google 直接进后台
+```
+
+**采集器配置：**
 
 ```bash
 cp app/cj/config/config.example.php app/cj/config/config.php
@@ -112,7 +164,12 @@ cp app/cj/config/config.example.php app/cj/config/config.php
 采集器并入 zhaopin 主站部署：DocumentRoot 指向主站 web root `zp_html/`，采集器可见文件在
 `zp_html/cj/`，访问 `http://zhaopin.es/cj/`。私有目录 `app/` 与 web root 平级，Web 天然不可达。
 
-Nginx 参考（在 zhaopin 主站 server 内为 `/cj/` 增加两个 location）：
+**主站用的是无扩展名 URL**（`/publish`、`/list`、`/c/cp/settings`、`/user/login`），
+必须有重写规则把它们指到同名 `.php`，否则站内每个链接都是 404。
+
+- **Apache**：`zp_html/.htaccess` 已内置这套规则，只需确保虚拟主机允许
+  `AllowOverride All` 且启用了 `mod_rewrite`（绝大多数共享主机默认满足）。
+- **Nginx**：不读 `.htaccess`，按下面的 `try_files` 配置。
 
 ```nginx
 server {
@@ -120,17 +177,27 @@ server {
     root /srv/zhaopin/zp_html;
     index index.php;
 
-    # 采集器：只放行内部入口，其余 /cj/ 下的 .php 一律拒绝
-    location ~ ^/cj/(index|review|dashboard|sources)\.php$ {
-        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+    # 主站无扩展名路由：/publish → /publish.php
+    location / {
+        try_files $uri $uri/ $uri.php?$query_string;
+    }
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        # 透传 Basic Auth 头，否则内部页面会“输对密码仍反复弹框”
+    }
+
+    # 采集器：只放行内部入口，其余 /cj/ 下的 .php 一律拒绝
+    location ~ ^/cj/(index|review|dashboard|sources)\.php$ {
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        # 透传 Basic Auth 头，否则内部页面会”输对密码仍反复弹框”
         fastcgi_param HTTP_AUTHORIZATION $http_authorization;
     }
     location ~ ^/cj/.*\.php$ { return 403; }
 
-    # …（zhaopin 主站自身的 location 规则）…
+    location ~ /\.  { deny all; }   # 隐藏文件
 }
 ```
 

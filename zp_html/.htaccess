@@ -1,0 +1,36 @@
+# zhaopin.es 主站 web root（DocumentRoot 指向本目录）。
+# 全站内部链接一律无扩展名（/publish、/list、/c/cp/settings、/user/login），
+# 本文件负责把它们映射到同名 .php 薄壳；缺本文件则站内每个链接都是 404。
+# Nginx 环境不读本文件，等效配置见 README「Web 服务器」。
+
+Options -Indexes -MultiViews
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # 真实存在的文件/目录（静态资源、/cj/ 等）原样放行
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # 无扩展名 → 同名 .php：/publish → publish.php，/c/cp/settings → c/cp/settings.php
+    RewriteCond %{REQUEST_FILENAME}\.php -f
+    RewriteRule ^(.+?)/?$ $1.php [L]
+</IfModule>
+
+# 隐藏文件（.htaccess、.git 等）一律拒绝
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# 私有目录 app/ 与本目录平级，Web 天然不可达；此处再兜一层，
+# 防止有人把仓库根目录（而非 zp_html/）误设为 DocumentRoot。
+RedirectMatch 404 ^/(app|db|docs)/
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
