@@ -122,8 +122,21 @@ final class CrawlerRepository
         ]);
     }
 
+    /**
+     * 加入人工复核队列。
+     * 幂等：同一 job_id 已有未处理条目时不重复插入——否则重复运行 bin/dedup.php
+     * （尤其 cron 定期跑）会让队列里堆满同一条记录。
+     */
     public function queueReview(int $jobId, ?int $candidateId, string $reason): void
     {
+        $exists = $this->db->prepare(
+            'SELECT 1 FROM cj_review_queue WHERE job_id = :job AND resolved = 0 LIMIT 1'
+        );
+        $exists->execute([':job' => $jobId]);
+        if ($exists->fetchColumn()) {
+            return;
+        }
+
         $sql = 'INSERT INTO cj_review_queue (job_id, candidate_id, reason, created_at)
                 VALUES (:job, :candidate, :reason, NOW())';
         $this->db->prepare($sql)->execute([
