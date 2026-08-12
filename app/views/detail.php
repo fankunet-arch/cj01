@@ -8,6 +8,9 @@ $offline = (int) $post['status'] !== 1;
 $publishedAt = zp_madrid($post['created_at'])->format('n月j日 H:i');
 $phoneMask = zp_phone_mask($post['phone']);
 $hasWechat = ($post['wechat'] ?? null) !== null;
+// 采集导入的帖子可能只有微信、没有电话（主站自己发布时电话必填，故此前不会出现）。
+// 电话为空还渲染「拨打」按钮，点了只会取到空值，是坏掉的观感。
+$hasPhone = trim((string) ($post['phone'] ?? '')) !== '';
 $code = $post['public_code'];
 ?>
   <nav class="nav">
@@ -83,10 +86,12 @@ $code = $post['public_code'];
           <div class="store"><?= zp_e($post['contact_name']) ?></div>
           <div class="sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><?= zp_e($post['region_name']) ?></div>
 
+          <?php if ($hasPhone): ?>
           <button class="callbtn js-call" data-code="<?= zp_e($code) ?>">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-3 2a12 12 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
             拨打 <span class="num"><?= zp_e($phoneMask) ?></span>
           </button>
+          <?php endif; ?>
 
           <?php if ($hasWechat): ?>
           <div class="wxrow">
@@ -112,10 +117,12 @@ $code = $post['public_code'];
 
   <!-- 移动端底部联系栏 -->
   <div class="m-contact">
+    <?php if ($hasPhone): ?>
     <button class="callbtn js-call" data-code="<?= zp_e($code) ?>">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-3 2a12 12 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
       拨打 <span class="num"><?= zp_e($phoneMask) ?></span>
     </button>
+    <?php endif; ?>
     <?php if ($hasWechat): ?>
     <button class="mwx js-wx" data-code="<?= zp_e($code) ?>"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 4C5 4 2 6.6 2 9.9c0 1.8 1 3.4 2.6 4.5L4 17l2.7-1.4c.7.2 1.5.3 2.3.3h.6a4.6 4.6 0 0 1-.2-1.3c0-3 2.9-5.3 6.4-5.3h.6C15.8 6 12.7 4 9 4z"/></svg></button>
     <?php endif; ?>

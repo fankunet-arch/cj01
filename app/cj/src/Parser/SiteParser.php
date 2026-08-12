@@ -20,6 +20,70 @@ final class SiteParser
         $this->config = $siteConfig;
     }
 
+    /**
+     * 详情页正文补全（不依赖任何选择器，源站改版也不会断）。
+     *
+     * 为什么需要：欧浪网列表页的 .category-detail-desc 是源站自己截断的预览
+     * （以「...」结尾），而电话/微信通常写在帖子正文末尾，正好被截掉——
+     * 结果是 contact_key 为空 → confidence=low → import_ready=0 → 永远导不进主库。
+     * 详情页才有完整正文。
+     *
+     * 做法：剥掉 script/style/nav/header/footer/aside 后，取文本量最大的块级节点当正文，
+     * 再顺带收集所有 tel: 链接（最可靠的电话来源）。
+     * 返回 ['text' => ?string, 'tel' => ?string]。
+     */
+    public function extractDetailText(string $html): array
+    {
+        $xpath = $this->xpath($html);
+
+        // tel: 链接优先——这是明确标注的电话，不需要猜
+        $tel = null;
+        foreach ($xpath->query('//a[starts-with(translate(@href,"TEL","tel"),"tel:")]') ?: [] as $a) {
+            $v = trim(rawurldecode(substr($a->getAttribute('href'), 4)));
+            if ($v !== '') {
+                $tel = $v;
+                break;
+            }
+        }
+
+        // 噪音节点整体移除，避免把导航/页脚文字当正文
+        foreach ($xpath->query('//script|//style|//noscript|//nav|//header|//footer|//aside|//form') ?: [] as $n) {
+            $n->parentNode?->removeChild($n);
+        }
+
+        // 选正文块：父节点的文本必然包含子节点，直接取「最长」只会选中整页外层容器。
+        // 用经典做法——先求最大文本量，再在「文本量 ≥ 最大值 60%」的候选里取最短的那个，
+        // 即仍然装着绝大部分正文、但已经不含外层导航/推荐位的最内层节点。
+        $cands = [];
+        $maxLen = 0;
+        foreach ($xpath->query('//body//div|//body//article|//body//section|//body//main') ?: [] as $n) {
+            $t = $this->normalizeSpace($n->textContent);
+            $len = mb_strlen($t);
+            if ($len >= 30) {
+                $cands[] = [$len, $t];
+                $maxLen = max($maxLen, $len);
+            }
+        }
+        if ($cands === []) {
+            return ['text' => null, 'tel' => $tel];
+        }
+        $floor = (int) ($maxLen * 0.6);
+        $best = null;
+        $bestLen = PHP_INT_MAX;
+        foreach ($cands as [$len, $t]) {
+            if ($len >= $floor && $len < $bestLen) {
+                $bestLen = $len;
+                $best = $t;
+            }
+        }
+        return ['text' => $best, 'tel' => $tel];
+    }
+
+    private function normalizeSpace(string $s): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $s) ?? $s);
+    }
+
     /** 列表页 → 详情页绝对 URL 列表（去重、保序）。 */
     public function parseListPage(string $html, string $pageUrl): array
     {

@@ -31,6 +31,10 @@ return [
         'district'     => null,
         'date'         => '.category-detail-meta',              // “发布 2026-07-27 · 地区 …”
     ],
+    // 列表页的 .category-detail-desc 是源站截断的预览（以「...」结尾），
+    // 电话/微信通常写在正文末尾、正好被截掉 → 抓不到联系方式就永远导不进主库。
+    // 开启后每条额外抓一次 /info/XXXXX 详情页补全正文与联系方式（不依赖选择器）。
+    'enrich_detail'      => true,
     'category'           => '招聘求职',
     'contact_mode'       => 'plain',
     'rate_limit'         => ['min_delay' => 8, 'max_delay' => 20],   // 秒（§6.1，礼貌采集）

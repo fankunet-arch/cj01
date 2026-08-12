@@ -16,7 +16,9 @@ $isSeekPost = (int) $post['type'] === 2;
         <div class="foot">
           <div class="pay"><?= $views > 0 ? $views . ' <small>次查看</small>' : '<small>新发布</small>' ?></div>
           <div class="cact">
+            <?php if (trim((string) ($post['phone'] ?? '')) !== ''): ?>
             <button class="call" data-code="<?= zp_e($post['public_code']) ?>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-3 2a12 12 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>拨打 <span class="num"><?= zp_e(zp_phone_mask($post['phone'])) ?></span></button>
+            <?php endif; ?>
             <?php if (($post['wechat'] ?? null) !== null): ?>
             <button class="wx" title="查看微信" data-code="<?= zp_e($post['public_code']) ?>"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 4C5 4 2 6.6 2 9.9c0 1.8 1 3.4 2.6 4.5L4 17l2.7-1.4c.7.2 1.5.3 2.3.3h.6a4.6 4.6 0 0 1-.2-1.3c0-3 2.9-5.3 6.4-5.3h.6C15.8 6 12.7 4 9 4z"/></svg></button>
             <?php endif; ?>

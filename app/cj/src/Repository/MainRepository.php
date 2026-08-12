@@ -148,6 +148,24 @@ final class MainRepository
     // ---------- 导入（仅 Importer 调用，人工确认后执行） ----------
 
     /**
+     * 采集号码 → 西班牙本地 9 位写法（去掉 +34 / 0034 / 34 前缀，去分隔符）。
+     * 不是 9 位西班牙号（外国号、座机全码等）就原样返回，不做破坏性改写。
+     */
+    private static function toLocalEsPhone(string $raw): string
+    {
+        if (trim($raw) === '') {
+            return '';
+        }
+        $d = preg_replace('/\D+/', '', $raw) ?? '';
+        if (str_starts_with($d, '0034')) {
+            $d = substr($d, 4);
+        } elseif (strlen($d) === 11 && str_starts_with($d, '34')) {
+            $d = substr($d, 2);
+        }
+        return strlen($d) === 9 ? $d : trim($raw);
+    }
+
+    /**
      * 采集记录写入 zhaopin_posts，origin='crawler'，返回主库新 id。
      * $job 为 cj_jobs_clean 一行（含 title/company/salary_raw/description/city/district/
      * category/contact_phone/contact_wechat/contact_name）。
@@ -164,7 +182,10 @@ final class MainRepository
         $pdo = $this->pdo();
 
         $content    = $this->buildContent($job);
-        $phone      = (string) ($job['contact_phone'] ?? '');
+        // 采集到的号码写法五花八门（+34 614248804 / 0034… / 裸 9 位）。存进主库前统一成
+        // 西班牙本地 9 位写法：主站的 zp_phone_mask() 取号码前 3 位做遮罩，若留着 +34
+        // 会把国家码当前缀显示成「拨打 346 ··」，而不是真实的「614 ··」。
+        $phone      = self::toLocalEsPhone((string) ($job['contact_phone'] ?? ''));
         $phoneNorm  = ContactNormalizer::phoneMain($phone);   // 主库兼容归一化
         $simhash    = SimHash::compute($content);             // 与 backfill 同源：对最终 content 取指纹
         $regionId   = $this->resolveRegionId($job['city'] ?? null, $job['district'] ?? null);

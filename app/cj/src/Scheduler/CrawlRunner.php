@@ -86,6 +86,7 @@ final class CrawlRunner
                             continue;
                         }
                         $consecutiveKnown = 0;
+                        $rec = $this->enrichFromDetail($rec);
                         $result = $this->processRecord($rec, $rec['source_url']);
                         $result === 'new' ? $new++ : $dup++;
                     }
@@ -233,6 +234,8 @@ final class CrawlRunner
                             $r['dup']++;
                             continue;
                         }
+                        $stage = "补全详情第 " . ($r['new'] + 1) . " 条（p{$page}）";
+                        $rec = $this->enrichFromDetail($rec);
                         $stage = "入库第 " . ($r['new'] + 1) . " 条（p{$page}）";
                         $result = $this->processRecord($rec, $rec['source_url']);
                         if ($result === 'new') {
@@ -310,6 +313,40 @@ final class CrawlRunner
     }
 
     /**
+     * 列表内联模式的详情补全：列表页给的 description 是源站截断的预览（以「...」结尾），
+     * 完整正文和写在正文末尾的联系方式都在详情页。这里额外抓一次详情页，
+     * 用不依赖选择器的方式取正文与 tel: 链接（源站改版也不会断）。
+     *
+     * 站点配置里 enrich_detail=false 可关闭（每条多一个请求，采得慢一半）。
+     * 抓失败就原样返回列表页那份，不影响主流程。
+     */
+    private function enrichFromDetail(array $rec): array
+    {
+        if (empty($this->site['enrich_detail']) || empty($rec['source_url'])) {
+            return $rec;
+        }
+        try {
+            $res = $this->fetcher->get((string) $rec['source_url'], $this->site['charset'] ?? null);
+            if ($res['status'] !== 200 || $res['body'] === null) {
+                return $rec;
+            }
+            $this->repo->saveRawPage($this->site['site'], (string) $rec['source_url'], $res['body'], $res['status']);
+            $d = $this->parser->extractDetailText($res['body']);
+            // 只在详情正文确实更完整时才替换，避免抓到导航壳反而更差
+            $listLen = mb_strlen((string) ($rec['description'] ?? ''));
+            if ($d['text'] !== null && mb_strlen($d['text']) > $listLen) {
+                $rec['description'] = $d['text'];
+            }
+            if (($rec['contact_phone'] ?? null) === null && $d['tel'] !== null) {
+                $rec['contact_phone'] = $d['tel'];
+            }
+        } catch (\Throwable $e) {
+            Logger::error('crawl', '[' . $this->site['site'] . '] 详情补全失败 ' . $rec['source_url'] . '：' . $e->getMessage());
+        }
+        return $rec;
+    }
+
+    /**
      * 归一化 → 三级去重 → 入库，返回 'new' | 'dup'。
      * 详情页模式与列表内联模式共用（$raw 为统一模型原始字段，$url 为 source_url）。
      */
@@ -318,6 +355,17 @@ final class CrawlRunner
         $siteId = $this->site['site'];
         $this->lastTitleEmpty = ($raw['title'] === null);
         $this->lastTitle = $raw['title'];
+
+        // 联系方式兜底：目标站多数帖子没有独立的电话/微信字段，号码直接写在正文里
+        // （「电话微信同号685093496」「微信maoge4349 电话688002153」）。
+        // 抓不到联系方式 → contact_key 为空 → confidence=low → import_ready=0，
+        // 帖子永远进不了主库，所以这一步决定了整条链路能不能出数。
+        if (($raw['contact_phone'] ?? null) === null) {
+            $raw['contact_phone'] = ContactNormalizer::phoneFromText($raw['description'] ?? null);
+        }
+        if (($raw['contact_wechat'] ?? null) === null) {
+            $raw['contact_wechat'] = ContactNormalizer::wechatFromText($raw['description'] ?? null);
+        }
 
         // 归一化（§3.3）
         $phoneNorm = ContactNormalizer::phone($raw['contact_phone']);

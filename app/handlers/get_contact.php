@@ -21,6 +21,10 @@ if ($post === null) {
 if ($ctype === 2 && ($post['wechat'] ?? null) === null) {
     zp_json(['ok' => false, 'error' => 'no_wechat'], 404);
 }
+// 采集导入的帖子可能只有微信没有电话；返回空号码会让前端显示一串空白
+if ($ctype === 1 && trim((string) ($post['phone'] ?? '')) === '') {
+    zp_json(['ok' => false, 'error' => 'no_phone', 'msg' => '该信息未留电话，请用微信联系'], 404);
+}
 
 $db = zp_db();
 $ipBin = zp_ip_bin();
