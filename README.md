@@ -41,11 +41,10 @@ cj01/
 │       ├── bin/             # CLI 入口（cron 调用，不经 Web）
 │       └── logs/            # 日志（不可对外）
 ├── db/                      # 数据库导入文件（MySQL 8.0/8.4 与 MariaDB 10.2+ 通用）
-│   ├── 00_zhaopin_main_schema.sql    # 主库全部 zhaopin_ 表（全新搭建用，已内建 simhash/origin）
-│   ├── 01_crawler_db_schema.sql      # 采集库 crawler_db 全部 cj_ 表
-│   ├── 02_zhaopin_main_ddl_patch.sql # 主库已存在时的增量补丁（只加 simhash/origin 两列）
-│   ├── 03_sample_data.sql            # 可选：开发联调样例数据
-│   └── 04_zhaopin_seed_data.sql      # 主库基础数据（参数/地区/类别/敏感词/管理员，全新搭建必需）
+│   ├── 01_main_schema.sql        # 主库 12 张 zhaopin_ 表（已内建 simhash/origin）
+│   ├── 02_main_seed_data.sql     # 主库基础数据（参数/地区/类别/敏感词/管理员）
+│   └── 03_crawler_tables.sql     # 采集器 6 张 cj_ 表
+│                                 # 编号即导入顺序，三个都必需，没有可选文件
 └── docs/                    # 需求与设计文档
 ```
 
@@ -57,17 +56,16 @@ cj01/
 
 | 步骤 | 要做的事 | 漏了会怎样 |
 |---|---|---|
-| 1 | 选中目标库，导入 `db/00_zhaopin_main_schema.sql` | 主库没有表，全站报错 |
-| 2 | 导入 `db/04_zhaopin_seed_data.sql`（**先改管理员邮箱**） | 发布页下拉为空、后台参数页空白、无人能登录后台 |
-| 3 | 导入 `db/01_crawler_db_schema.sql`（6 张 `cj_` 表，可与主站同库） | 采集器所有页面报错 |
+| 1 | 选中目标库，导入 `db/01_main_schema.sql` | 主库没有表，全站报错 |
+| 2 | 导入 `db/02_main_seed_data.sql`（**先改管理员邮箱**） | 发布页下拉为空、后台参数页空白、无人能登录后台 |
+| 3 | 导入 `db/03_crawler_tables.sql`（6 张 `cj_` 表，可与主站同库） | 采集器所有页面报错 |
 | 4 | `app/config/config.example.php` → `config.php` 并填写 | 全站 HTTP 500 |
 | 5 | `app/cj/config/config.example.php` → `config.php` 并填写 | 采集器页面报错 |
 | 6 | Apache 保证 `mod_rewrite` + `AllowOverride All`；Nginx 按 §3 配 `try_files` | 站内每个链接都 404 |
 | 7 | `app/cj/logs/` 可写（属主给 PHP 运行账号） | 采集无法写日志 |
 
-不要导入 `db/02`（那是给已有主库用的增量补丁，全新搭建导了会报
-`Duplicate column name 'simhash'`）；`db/03` 是本机联调用的假数据，生产别导。
-SQL 文件都不含建库语句，共享主机没有建库权也能导。
+`db/` 下只有这三个文件，**编号就是导入顺序，一个都不能少、也没有多余的**。
+SQL 文件都不含建库语句，共享主机（没有 `CREATE DATABASE` 权限）也能直接导。
 
 ### 1. 数据库（MySQL 8.0/8.4 与 MariaDB 10.2+ 通用）
 
@@ -89,55 +87,35 @@ SQL 文件都不含建库语句，共享主机没有建库权也能导。
 
 ```bash
 # ① 主库建表（已内建采集器所需的 simhash/origin 两列）
-mysql -u 用户名 -p 你的库名 < db/00_zhaopin_main_schema.sql
+mysql -u 用户名 -p 你的库名 < db/01_main_schema.sql
 
 # ② 主库基础数据 ★必需★（导入前先改文件末尾的管理员邮箱）
-mysql -u 用户名 -p 你的库名 < db/04_zhaopin_seed_data.sql
+mysql -u 用户名 -p 你的库名 < db/02_main_seed_data.sql
 
 # ③ 采集表（6 张 cj_ 表；放主站同库就填主站库名，独立库就填那个库名）
-mysql -u 用户名 -p 你的库名 < db/01_crawler_db_schema.sql
-
-# 可选：开发联调样例数据（生产别导）
-mysql -u 用户名 -p 你的库名 < db/03_sample_data.sql
+mysql -u 用户名 -p 你的库名 < db/03_crawler_tables.sql
 ```
 
 MariaDB 把 `mysql` 换成 `mariadb`，文件本身无需任何改动。
 用 phpMyAdmin 的话：**先在左侧点中目标库**，再「导入」上传文件，
 顺序同上（不点中库直接导入会报 `No database selected`）。
 
-> **不要导入 `db/02`。** 它是给「主库早就存在、有数据、只想增量加两列」用的补丁。
-> 全新搭建走的是 `00`，两列已经内建在建表语句里，再导 `02` 必然报
-> `#1060 - Duplicate column name 'simhash'`。看到这个报错说明列早就有了，
-> 是重复操作而非故障，忽略即可，数据库不会被改坏。
-> 拿不准就先查：`SHOW COLUMNS FROM zhaopin_posts LIKE 'simhash';` 有输出就别导。
->
-> **② 不可跳过**，`00` 只建空表结构。缺基础数据会出现三个致命现象：
+> **② 不可跳过**，`01` 只建空表结构。缺基础数据会出现三个致命现象：
 > 发布页地区/类别下拉为空（发不出任何信息）、后台「参数配置」页一片空白
 > （该页只 UPDATE 已存在的键，表空就什么都改不了）、后台无人能登录
 > （管理员是「Google 登录 + 邮箱白名单」制，`zhaopin_admins` 空 = 全部拒绝）。
 >
-> **导入 `04` 前必须改一处**：文件末尾的 `you@example.com` 改成你自己用来登录
+> **导入 `02` 前必须改一处**：文件末尾的 `you@example.com` 改成你自己用来登录
 > Google 的真实邮箱，`role` 保持 `2`（超级管理员；`1` 是普通管理员，进不了
 > 「参数配置」「管理员」「置顶券」三页，也就没法再添加别的管理员）。
 > 文件可重复导入，不会覆盖你后来改过的值。
 >
-> `04` 里的城市名用 `MADRID` / `BARCELONA` 这类大写西语写法，是刻意为之：
+> `02` 里的城市名用 `MADRID` / `BARCELONA` 这类大写西语写法，是刻意为之：
 > 采集器导入时按城市名在 `zhaopin_regions` 里查 `region_id`，目标站正是这种写法，
 > 改成中文名会导致采集数据全部落进兜底的「其他地区」。
 >
-> **主库已存在且有数据**时才不要用 `00`，改用增量补丁只加两列：
-> `mysql -u 用户名 -p 你的库名 < db/02_zhaopin_main_ddl_patch.sql`，
-> 基础数据也按需自行取舍。
->
 > 主库招聘表 `zhaopin_posts` 自带 `phone_norm`（电话去重）与 `content_hash`（精确去重），
 > 采集器只额外需要 `simhash`（模糊去重）与 `origin`（来源标记）两列。
-
-主库存量数据回填 `simhash`（跑一次；`phone_norm`/`origin` 无需回填）：
-
-```bash
-php app/cj/bin/backfill_main.php --dry-run
-php app/cj/bin/backfill_main.php
-```
 
 ### 2. 应用配置
 

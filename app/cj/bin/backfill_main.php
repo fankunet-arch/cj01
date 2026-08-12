@@ -1,7 +1,9 @@
 <?php
 /**
  * 一次性脚本：回填 zhaopin 主库 zhaopin_posts 存量记录的 simhash
- * （文档 §11 改动一的配套；执行前主库需已跑 db/02_zhaopin_main_ddl_patch.sql）。
+ * （文档 §11 改动一的配套；simhash 列已内建于 db/01_main_schema.sql。
+ * 全新搭建的库没有存量数据，无需跑本脚本；它只用于给早先建好、
+ * 已有历史帖子的主库补算 simhash。）
  *
  * 真实主库已自带 phone_norm（NOT NULL，全量已填），故本脚本只回填 simhash。
  * simhash 由 content 计算，与采集器同一算法（Cj\Dedup\SimHash）。

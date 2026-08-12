@@ -49,6 +49,29 @@ final class CrawlControl
         return self::stateDir() . '/crawl_trigger.lock';
     }
 
+    /**
+     * 本机能否调用 exec()。虚拟主机（含本项目的目标环境）普遍在
+     * disable_functions 里禁掉它，而本类处于命名空间下，直接调用被禁函数是
+     * Fatal（Call to undefined function Cj\Scheduler\exec()）而非 Warning，
+     * 会让整个页面 500。所有 exec 调用点都必须先过这里。
+     *
+     * function_exists() 对 disable_functions 里的函数返回 false，单靠它即可；
+     * 再解析一次 ini 是兜底（某些 SAPI 下 function_exists 仍报 true）。
+     */
+    private static function canExec(): bool
+    {
+        if (!function_exists('exec')) {
+            return false;
+        }
+        $disabled = (string) ini_get('disable_functions');
+        foreach (explode(',', $disabled) as $fn) {
+            if (strcasecmp(trim($fn), 'exec') === 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static function debugFlagFile(): string
     {
         return self::stateDir() . '/debug.enabled';
@@ -195,6 +218,20 @@ final class CrawlControl
      */
     public static function trigger(): array
     {
+        // 虚拟主机普遍在 disable_functions 里禁掉 exec。本类在命名空间下，
+        // 被禁时调用 exec() 不是 Warning 而是
+        //   Fatal error: Call to undefined function Cj\Scheduler\exec()
+        // （命名空间里找不到的函数无法回退到全局函数），整页 500。
+        // 故所有 exec 调用前必须先过 self::canExec()。
+        // 这个检查必须在 acquire() 之前：acquire() 会把当前时间写进锁文件当作
+        // 「上次触发时间」，先取许可再失败等于白烧掉一小时冷却窗口。
+        if (!self::canExec()) {
+            Logger::info('crawl', '一键采集：本机禁用 exec，无法后台拉起，提示改用同步采集');
+            return ['ok' => false, 'message' =>
+                '本主机禁用了 exec()，无法在后台拉起采集进程（虚拟主机常见）。'
+                . '请改用「同步采集一批（立即出结果）」按钮，它在当前请求内直接采集，不依赖 exec。'];
+        }
+
         $acquired = self::acquire();
         if (!$acquired['ok']) {
             return $acquired;
@@ -212,6 +249,7 @@ final class CrawlControl
             escapeshellarg($script),
             escapeshellarg($logFile)
         );
+        $exit = 1;
         exec($cmd, $out, $exit);
         if ($exit !== 0) {
             Logger::error('crawl', "一键采集拉起失败 exit=$exit cmd=$cmd");
@@ -258,10 +296,18 @@ final class CrawlControl
 
         // 1. 强制杀死后台进程 (基于特征匹配)
         // 注意：基于您架构中的拉起方式，进程名为 crawl.php
-        $script = 'bin/crawl.php';
-        exec(sprintf('pkill -9 -f %s 2>&1', escapeshellarg($script)), $out, $exit);
-        if ($exit === 0) {
-            $messages[] = '已向卡死的后台采集进程发送终止信号';
+        // exec 被禁用时必须跳过，否则命名空间下会 Fatal（见 trigger() 内注释）。
+        // 跳过也没关系：虚拟主机本来就拉不起后台进程，真正要清的是下面的
+        // 僵尸 running 记录和文件锁——那才是让按钮一直置灰的原因。
+        if (self::canExec()) {
+            $script = 'bin/crawl.php';
+            $exit = 1;
+            exec(sprintf('pkill -9 -f %s 2>&1', escapeshellarg($script)), $out, $exit);
+            if ($exit === 0) {
+                $messages[] = '已向卡死的后台采集进程发送终止信号';
+            }
+        } else {
+            $messages[] = '本机禁用 exec，跳过进程终止（虚拟主机无后台进程，无需终止）';
         }
 
         // 2. 物理抹除数据库中的僵尸运行记录（消除 MAX(started_at) 对下次触发的影响）

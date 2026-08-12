@@ -14,7 +14,7 @@ use PDO;
  *
  * 三级去重（只读）：
  *  - 电话：比对 zhaopin_posts.phone_norm（主库已有列并入 idx_dedup，无需新增）。
- *  - 指纹：比对 zhaopin_posts.simhash（新增列，见 db/02_zhaopin_main_ddl_patch.sql）。
+ *  - 指纹：比对 zhaopin_posts.simhash（该列已内建于 db/01_main_schema.sql）。
  * 导入/清理（仅 Importer / Purger 调用）：写 zhaopin_posts，origin='crawler' 双保险。
  *
  * 与采集库字段的对应关系（真实主库无独立 title/company/salary/district/publish_date）：

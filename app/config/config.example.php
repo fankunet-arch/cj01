@@ -15,7 +15,7 @@ return [
 
     // ── 数据库 ──────────────────────────────────────────────
     // MySQL 8.0/8.4 与 MariaDB 10.5+ 均可，库本身用
-    //   db/00_zhaopin_main_schema.sql（建表）+ db/04_zhaopin_seed_data.sql（基础数据）
+    //   db/01_main_schema.sql（建表）+ db/02_main_seed_data.sql（基础数据）
     // 建立。建库语句：
     //   CREATE DATABASE zhaopin DEFAULT CHARACTER SET utf8mb4
     //     DEFAULT COLLATE utf8mb4_unicode_520_ci;

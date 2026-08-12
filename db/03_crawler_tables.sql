@@ -52,8 +52,8 @@
 --   3) 只用两边通用语法：无 MySQL 专有函数/子句，保留字 `signal` 已加反引号。
 --
 -- 导入方式（两种数据库命令相同，库名换成你实际选定的那个）：
---   命令行： mysql -u 用户名 -p 你的库名 < db/01_crawler_db_schema.sql
---            mariadb -u 用户名 -p 你的库名 < db/01_crawler_db_schema.sql
+--   命令行： mysql -u 用户名 -p 你的库名 < db/03_crawler_tables.sql
+--            mariadb -u 用户名 -p 你的库名 < db/03_crawler_tables.sql
 --   phpMyAdmin：先在左侧点中目标库，再「导入」上传本文件。
 --               （不点中库直接导入会报 "No database selected"）
 -- ============================================================

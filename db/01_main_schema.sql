@@ -13,7 +13,7 @@
 --      已知差异（实测）：不同 emoji 在 MySQL 8.0 下判为不等、MariaDB 10.11 下
 --      判为相等；两边通用的排序规则里没有能区分 emoji 的，对本项目也无实质
 --      影响（去重走 content_hash/phone_norm，不依赖排序规则）。详见
---      db/01_crawler_db_schema.sql 头部说明。
+--      db/03_crawler_tables.sql 头部说明。
 --   2) 显式 ROW_FORMAT=DYNAMIC
 --      InnoDB 索引长度上限依赖行格式：DYNAMIC 3072 字节，老的 COMPACT 仅 767 字节。
 --      本库 zhaopin_admins.uk_email 是 VARCHAR(255) utf8mb4 唯一索引（1020 字节），
@@ -31,8 +31,8 @@
 --   建库那一步请在主机控制面板里做，或用主机分配好的那个库。
 --
 --   phpMyAdmin：先在左侧点中目标库，再「导入」上传本文件。
---   命令行：    mysql   -u 用户名 -p 你的库名 < db/00_zhaopin_main_schema.sql
---               mariadb -u 用户名 -p 你的库名 < db/00_zhaopin_main_schema.sql
+--   命令行：    mysql   -u 用户名 -p 你的库名 < db/01_main_schema.sql
+--               mariadb -u 用户名 -p 你的库名 < db/01_main_schema.sql
 --   自己有建库权限时（本机开发/独立服务器）先建库：
 --     CREATE DATABASE `你的库名` DEFAULT CHARACTER SET utf8mb4
 --         DEFAULT COLLATE utf8mb4_unicode_520_ci;
@@ -40,7 +40,7 @@
 --   COLLATE utf8mb4_unicode_520_ci，不会继承库的默认值。
 --
 -- 注：本文件只建结构，不含任何数据。全新搭建时必须紧接着导入基础数据：
---       mysql -u root -p 你的库名 < db/04_zhaopin_seed_data.sql
+--       mysql -u root -p 你的库名 < db/02_main_seed_data.sql
 --     否则发布页地区/类别下拉为空、后台「参数配置」页空白、且无人能登录后台。
 -- ============================================================
 
