@@ -148,6 +148,49 @@ final class MainRepository
     // ---------- 导入（仅 Importer 调用，人工确认后执行） ----------
 
     /**
+     * 导入前校验兜底外键 id 真实存在（每次导入只查一次）。
+     *
+     * 为什么必须校验：主站首页/列表页是
+     *   posts JOIN regions ON r.id=p.region_id JOIN categories ON c.id=p.category_id
+     * 的 INNER JOIN。兜底 id 若填了 0 或不存在的值，INSERT 不会报错（无外键约束），
+     * 但这些帖子在网站上一条都显示不出来——表现为「导入成功却看不到数据」，
+     * 极难排查。宁可在导入前直接中止并说清楚改哪里。
+     */
+    private function assertFallbackIdsExist(): void
+    {
+        static $checked = false;
+        if ($checked) {
+            return;
+        }
+        $pairs = [
+            ['default_region_id', $this->table('regions_table', 'zhaopin_regions'), '地区'],
+            ['default_category_id', $this->table('categories_table', 'zhaopin_categories'), '分类'],
+        ];
+        foreach ($pairs as [$key, $table, $label]) {
+            $id = (int) ($this->importCfg[$key] ?? 0);
+            if ($id <= 0) {
+                throw new \RuntimeException(
+                    "主库导入兜底{$label} id 未配置：config.php → main.import.$key 现在是 "
+                    . var_export($this->importCfg[$key] ?? null, true)
+                    . "。它必须是主库 $table 里真实存在的「其他」类记录 id"
+                    . '（用 db/02_main_seed_data.sql 建的库：地区填 899、分类填 99）。'
+                );
+            }
+            $stmt = $this->pdo()->prepare("SELECT 1 FROM $table WHERE id = :id LIMIT 1");
+            $stmt->execute([':id' => $id]);
+            if ($stmt->fetchColumn() === false) {
+                throw new \RuntimeException(
+                    "主库导入兜底{$label} id=$id 在 $table 中不存在"
+                    . "（config.php → main.import.{$key}）。"
+                    . '按这个 id 导进去的帖子在主站列表页不会显示（列表页与地区/分类表是 INNER JOIN）。'
+                    . '用 db/02_main_seed_data.sql 建的库：地区填 899、分类填 99。'
+                );
+            }
+        }
+        $checked = true;
+    }
+
+    /**
      * 采集号码 → 西班牙本地 9 位写法（去掉 +34 / 0034 / 34 前缀，去分隔符）。
      * 不是 9 位西班牙号（外国号、座机全码等）就原样返回，不做破坏性改写。
      */
@@ -180,6 +223,7 @@ final class MainRepository
     public function insertJob(array $job): int
     {
         $pdo = $this->pdo();
+        $this->assertFallbackIdsExist();
 
         $content    = $this->buildContent($job);
         // 采集到的号码写法五花八门（+34 614248804 / 0034… / 裸 9 位）。存进主库前统一成

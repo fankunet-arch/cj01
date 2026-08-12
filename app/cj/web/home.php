@@ -82,11 +82,50 @@ try {
 
 $crawlStatus = CrawlControl::status();
 
+// 导入相关的配置体检：这两项配错了不会在采集阶段暴露，要等点了「导入主库」才炸，
+// 或者更糟——导进去了但主站列表页一条都不显示。提前在页面上说清楚。
+$importWarn = [];
+$mainCfg = cj_config('main') ?? [];
+if (($mainCfg['mode'] ?? 'off') === 'off') {
+    $importWarn[] = 'main.mode 当前是 off：既不能导入主库，三级去重也不会与主站已有内容比对。'
+        . '把 app/cj/config/config.php 里 main 段的 \'mode\' => \'off\' 改成 \'mode\' => \'db\' 即可。';
+} else {
+    foreach ([['default_region_id', 'regions_table', 'zhaopin_regions', '地区', 899],
+              ['default_category_id', 'categories_table', 'zhaopin_categories', '分类', 99]] as [$k, $tk, $td, $label, $sample]) {
+        $id = (int) ($mainCfg['import'][$k] ?? 0);
+        if ($id <= 0) {
+            $importWarn[] = "main.import.{$k} 没填（当前 {$id}）：导入会中止。用 db/02_main_seed_data.sql 建的库填 {$sample}。";
+            continue;
+        }
+        try {
+            $t = preg_replace('/[^A-Za-z0-9_]/', '', (string) (cj_main_db_config()[$tk] ?? $td));
+            $q = Db::main()->prepare("SELECT 1 FROM $t WHERE id = :id LIMIT 1");
+            $q->execute([':id' => $id]);
+            if ($q->fetchColumn() === false) {
+                $importWarn[] = "main.import.$k = $id 在主库 $t 里不存在：按它导进去的帖子在主站列表页不会显示"
+                    . "（列表页与{$label}表是 INNER JOIN）。用 db/02_main_seed_data.sql 建的库填 {$sample}。";
+            }
+        } catch (Throwable $e) {
+            $importWarn[] = '主库连接失败，无法校验导入配置：' . $e->getMessage();
+            break;
+        }
+    }
+}
+
 $pageTitle = '概览';
-$renderBody = function () use ($stats, $dbError, $flash, $crawlStatus) {
+$renderBody = function () use ($stats, $dbError, $flash, $crawlStatus, $importWarn) {
     ?>
     <?php if ($flash !== null): ?>
         <div class="card <?= $flash['ok'] ? 'status-ok' : 'status-failed' ?>" style="white-space:pre-line"><?= cj_e($flash['text']) ?></div>
+    <?php endif; ?>
+
+    <?php if ($importWarn !== []): ?>
+        <div class="card status-failed">
+            <strong>导入主库前需要先改配置：</strong>
+            <ul style="margin:8px 0 0 18px">
+                <?php foreach ($importWarn as $w): ?><li><?= cj_e($w) ?></li><?php endforeach; ?>
+            </ul>
+        </div>
     <?php endif; ?>
 
     <?php if ($dbError !== null): ?>

@@ -53,7 +53,7 @@ final class Purger
                 ));
             }
         }
-        Logger::info('purge', "主库清理：deleted=$deleted skipped=$skipped" . ($batch !== null ? "（批次 $batch）" : ''));
+        Logger::info('purge', "主库清理：deleted=$deleted skipped=$skipped" . ($batch !== null ? "（批次 {$batch}）" : ''));
         return ['deleted' => $deleted, 'skipped' => $skipped, 'total' => count($rows)];
     }
 
