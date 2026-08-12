@@ -26,11 +26,18 @@
 --      · origin ：数据来源标记（user=自有UGC / crawler=冷启动采集导入），
 --                 清理采集数据时作双保险，默认 'user' 不影响主站自身逻辑
 --
--- 【用法】先建库并选库，再导入本文件（MySQL 与 MariaDB 命令相同）：
---   CREATE DATABASE `你的库名` DEFAULT CHARACTER SET utf8mb4
---       DEFAULT COLLATE utf8mb4_unicode_520_ci;
---   mysql   -u root -p 你的库名 < db/00_zhaopin_main_schema.sql
---   mariadb -u root -p 你的库名 < db/00_zhaopin_main_schema.sql
+-- 【本文件不建库、不选库】只建表，导进「你当前选中的那个库」。
+--   共享主机（OVH / cPanel 等）的库账号没有 CREATE DATABASE 权限，
+--   建库那一步请在主机控制面板里做，或用主机分配好的那个库。
+--
+--   phpMyAdmin：先在左侧点中目标库，再「导入」上传本文件。
+--   命令行：    mysql   -u 用户名 -p 你的库名 < db/00_zhaopin_main_schema.sql
+--               mariadb -u 用户名 -p 你的库名 < db/00_zhaopin_main_schema.sql
+--   自己有建库权限时（本机开发/独立服务器）先建库：
+--     CREATE DATABASE `你的库名` DEFAULT CHARACTER SET utf8mb4
+--         DEFAULT COLLATE utf8mb4_unicode_520_ci;
+--   建库时的排序规则其实不影响本文件——每张表都显式写了
+--   COLLATE utf8mb4_unicode_520_ci，不会继承库的默认值。
 --
 -- 注：本文件只建结构，不含任何数据。全新搭建时必须紧接着导入基础数据：
 --       mysql -u root -p 你的库名 < db/04_zhaopin_seed_data.sql

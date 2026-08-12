@@ -8,10 +8,11 @@
 --           （settings 页只做 UPDATE 不做 INSERT，表里没有行就什么都改不了）
 --         · 后台无人能登录（管理员是邮箱白名单制，表空 = 全部拒绝）
 --
--- 【导入顺序】
---   mysql -u root -p 你的库名 < db/00_zhaopin_main_schema.sql   # 建表
---   mysql -u root -p 你的库名 < db/04_zhaopin_seed_data.sql     # 基础数据（本文件）
+-- 【导入顺序】本文件不选库，导进你当前选中的那个库（与 00 同一个库）。
+--   mysql -u 用户名 -p 你的库名 < db/00_zhaopin_main_schema.sql   # 先建表
+--   mysql -u 用户名 -p 你的库名 < db/04_zhaopin_seed_data.sql     # 再导本文件
 --   MariaDB 把 mysql 换成 mariadb 即可，文件无需改动。
+--   phpMyAdmin：先在左侧点中主站库，再「导入」上传本文件。
 --
 -- 【导入前必改一处】文件末尾的管理员邮箱，改成你自己的 Google 登录邮箱，
 --                   否则后台 /c/cp/ 没有任何人能进。

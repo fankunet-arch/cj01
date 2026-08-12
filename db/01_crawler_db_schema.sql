@@ -1,7 +1,27 @@
 -- ============================================================
--- 招聘采集程序 采集库（crawler_db）建库导入文件
+-- 招聘采集程序 采集库建表文件（6 张 cj_ 表）
 -- 依据：《招聘采集程序_需求与设计文档_v1.2》 §5
--- 命名约定：所有采集库表统一 cj_ 前缀（cj = 采集）
+-- 命名约定：所有采集表统一 cj_ 前缀（cj = 采集）
+--
+-- 【本文件不建库、不选库】只建表，导进「你当前选中的那个库」。
+--   共享主机（OVH / cPanel 等）的库账号没有 CREATE DATABASE 权限，
+--   文件里若带 CREATE DATABASE 会直接报
+--     #1044 - Access denied for user 'xxx'@'%' to database 'crawler_db'
+--   所以建库这一步交给你：要么在主机控制面板里新建一个库，
+--   要么干脆用主站那个库（推荐，见下）。
+--
+-- 【放哪个库？】两种都行，代码不关心：
+--   A) 与主站同库（共享主机只给一个库时用这个，推荐）
+--      6 张表全是 cj_ 前缀，和主站的 zhaopin_ 表不会撞名，可以安心共存。
+--      导入：phpMyAdmin 里选中主站那个库 → 导入本文件。
+--      配置：app/cj/config/config.php 的 crawler_db.name 填主站库名
+--            （host/user/pass 也和主站一样）。
+--   B) 独立一个库（能自己建库时用这个，冷启动结束后可整库删掉，更干净）
+--      先建库再选中导入：
+--        CREATE DATABASE `crawler_db` DEFAULT CHARACTER SET utf8mb4
+--            DEFAULT COLLATE utf8mb4_unicode_520_ci;
+--      配置：crawler_db.name 填该库名。
+--   两种方式下采集器与主站都各自独立连接，没有任何跨库 JOIN。
 --
 -- 【跨库通用】本文件在 MySQL 8.0/8.4 与 MariaDB 10.2+ 上均可直接导入，
 --             两种数据库之间可无缝切换，无需改动本文件。为此做了三处约定：
@@ -31,18 +51,14 @@
 --
 --   3) 只用两边通用语法：无 MySQL 专有函数/子句，保留字 `signal` 已加反引号。
 --
--- 导入方式（两种数据库命令相同）：
---   mysql   -u root -p < db/01_crawler_db_schema.sql
---   mariadb -u root -p < db/01_crawler_db_schema.sql
+-- 导入方式（两种数据库命令相同，库名换成你实际选定的那个）：
+--   命令行： mysql -u 用户名 -p 你的库名 < db/01_crawler_db_schema.sql
+--            mariadb -u 用户名 -p 你的库名 < db/01_crawler_db_schema.sql
+--   phpMyAdmin：先在左侧点中目标库，再「导入」上传本文件。
+--               （不点中库直接导入会报 "No database selected"）
 -- ============================================================
 
 SET NAMES utf8mb4;
-
-CREATE DATABASE IF NOT EXISTS `crawler_db`
-    DEFAULT CHARACTER SET utf8mb4
-    DEFAULT COLLATE utf8mb4_unicode_520_ci;
-
-USE `crawler_db`;
 
 -- ------------------------------------------------------------
 -- 5.1 cj_raw_pages — 原始抓取存档

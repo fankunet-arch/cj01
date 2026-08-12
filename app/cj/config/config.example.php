@@ -6,11 +6,16 @@
 
 return [
 
-    // ---- 采集库（crawler_db，读写） ----
+    // ---- 采集表所在的库（6 张 cj_ 表，读写） ----
+    // 这 6 张表放哪个库都行，代码不关心，也没有任何跨库 JOIN：
+    //   · 共享主机只给一个库（OVH / cPanel 常见）：直接填主站那个库，
+    //     host/user/pass 也和主站 app/config/config.php 的 db 段填一样的。
+    //     cj_ 前缀与主站 zhaopin_ 前缀不会撞名，可安心共存。
+    //   · 能自己建库：单独建一个（如 crawler_db），冷启动结束后整库删掉更干净。
     'crawler_db' => [
         'host'    => '127.0.0.1',
         'port'    => 3306,
-        'name'    => 'crawler_db',
+        'name'    => 'crawler_db',      // ← 与主站同库时改成主站库名
         'user'    => 'crawler',
         'pass'    => 'CHANGE_ME',
         'charset' => 'utf8mb4',

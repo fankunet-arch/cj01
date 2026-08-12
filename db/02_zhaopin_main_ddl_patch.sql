@@ -1,22 +1,29 @@
 -- ============================================================
 -- zhaopin.es 主库配合改动清单（DDL 补丁）
 -- 依据：《招聘采集程序_需求与设计文档_v1.2》 §11，并对齐真实主库结构
--- 目标环境：MySQL 8.4
+-- 目标环境：MySQL 8.0/8.4 与 MariaDB 10.x 通用
 --
 -- 真实招聘表为 `zhaopin_posts`（不是文档假设的 `jobs`）。
 -- 主库已自带 `phone_norm`（并入 idx_dedup）与 `content_hash`（精确去重），
 -- 因此三级去重的“电话键”直接复用 phone_norm，无需再加 contact_key。
 -- 本补丁只新增采集器缺失的两列：simhash（模糊去重）、origin（来源标记）。
 --
--- 在 zhaopin 主库执行。若表名/库名与此不同，按实际调整。
+-- ★★ 全新搭建的话，本文件根本不要导入 ★★
+--   db/00_zhaopin_main_schema.sql 已经把 simhash / origin 两列内建在建表语句里，
+--   建完表再导本文件，必然报：
+--       #1060 - Duplicate column name 'simhash'
+--   看到这个报错说明两列早就有了，是重复操作，不是故障 —— 忽略即可，
+--   数据库没有被改坏（ALTER 失败不会留下半成品）。
 --
--- 【全新搭建主库请改用 db/00_zhaopin_main_schema.sql】
---   该文件已把本补丁的 simhash / origin 两列直接内建，且做了 MySQL/MariaDB
---   跨库兼容化（utf8mb4_unicode_520_ci + ROW_FORMAT=DYNAMIC），一步到位。
---   本文件仅用于「主库已存在且有数据、只想增量加两列」的场景。
+--   本文件只用于一种场景：主库是早先建的、里面已经有数据、不能推倒重建，
+--   只想增量补上采集器需要的这两列。
+--
+-- 【怎么确认要不要导】先查一下，有输出就说明已经有了，别导：
+--   SHOW COLUMNS FROM `zhaopin_posts` LIKE 'simhash';
+--
+-- 【本文件不选库】导进你当前选中的那个库。
+--   phpMyAdmin 里先在左侧点中主站库，再「导入」上传本文件。
 -- ============================================================
-
--- USE `你的主库名`;   -- ← 例如导出中的 mhdlmskzoi87b0i，按实际取消注释
 
 -- ------------------------------------------------------------
 -- 改动一：新增内容指纹列 simhash（三级去重的模糊比对，见文档 §3、§4.4）
@@ -28,8 +35,8 @@ ALTER TABLE `zhaopin_posts`
     ADD KEY `idx_simhash` (`simhash`);
 
 -- 存量数据需回填一次 simhash（对已有 content 计算指纹）：
---   php app/bin/backfill_main.php --dry-run
---   php app/bin/backfill_main.php
+--   php app/cj/bin/backfill_main.php --dry-run
+--   php app/cj/bin/backfill_main.php
 -- phone_norm 主库已有且为 NOT NULL，无需回填。
 -- 主站新发布招聘应在写入时同步生成 simhash（与采集器同一算法：SimHash 类）。
 

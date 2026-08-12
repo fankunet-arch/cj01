@@ -1,9 +1,15 @@
 -- ============================================================
--- 可选：开发/联调用样例数据（生产环境勿导入）
--- 导入：mysql -u root -p crawler_db < db/03_sample_data.sql
+-- 可选：开发/联调用样例数据（★生产环境勿导入★）
+--
+-- 只在本机联调时用来造几条假数据看看页面效果，线上不要导。
+-- 本文件不选库，导进「你当前选中的那个库」——即放 cj_ 表的那个库
+-- （与主站同库或独立库都行，见 db/01 头部说明）。
+--
+-- 导入：mysql -u 用户名 -p 你的库名 < db/03_sample_data.sql
+--       phpMyAdmin 里先点中目标库再上传本文件。
 -- ============================================================
 
-USE `crawler_db`;
+SET NAMES utf8mb4;
 
 INSERT INTO `cj_jobs_clean`
     (`source_site`, `source_url`, `title`, `company`, `category`, `city`, `district`,
@@ -33,6 +39,9 @@ VALUES (3, 1, 'simhash 汉明距离=5，联系方式不同，疑似同源改文�
 INSERT INTO `cj_crawl_runs`
     (`source_site`, `started_at`, `finished_at`, `pages_fetched`, `new_jobs`, `dup_jobs`, `errors`, `status`, `note`)
 VALUES
-    ('oulang',    NOW() - INTERVAL 2 HOUR, NOW() - INTERVAL 110 MINUTE, 12, 8, 3, 0, 'ok', NULL),
-    ('huarenjie', NOW() - INTERVAL 1 HOUR, NOW() - INTERVAL 50 MINUTE,  6, 2, 4, 1, 'ok', '1 页抓取超时后重试成功'),
-    ('xihua',     NOW() - INTERVAL 30 MINUTE, NULL, 3, 1, 0, 0, 'running', NULL);
+-- 注意：这里三条全部是「已结束」的任务，不要留 status='running' / finished_at=NULL
+-- 的样例行——采集闸门会判定「采集进行中」，导致「一键采集」按钮永久置灰，
+-- 看起来像程序坏了，实际是被这条假数据挡住的。
+    ('oulang',    NOW() - INTERVAL 2 HOUR,    NOW() - INTERVAL 110 MINUTE, 12, 8, 3, 0, 'ok',     NULL),
+    ('huarenjie', NOW() - INTERVAL 1 HOUR,    NOW() - INTERVAL 50 MINUTE,   6, 2, 4, 1, 'ok',     '1 页抓取超时后重试成功'),
+    ('xihua',     NOW() - INTERVAL 30 MINUTE, NOW() - INTERVAL 28 MINUTE,   3, 1, 0, 2, 'failed', '样例：列表页 HTTP 403');
